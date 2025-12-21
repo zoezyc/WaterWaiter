@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Play, Pause, User, Check, Coffee } from 'lucide-react';
 import clsx from 'clsx';
 import { useRobotStore } from '../store/robot.store';
 import { createClient } from '@supabase/supabase-js';
+import { socket } from '../socket';
 
 // Setup Supabase (mocking env vars for now - user should have filled them)
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -23,22 +24,75 @@ const DRINKS_OPTIONS = [
     { id: 4, name: 'Coffee', icon: '☕' },
 ];
 
+// Map robot status to UI interaction state
+const statusToState: Record<string, InteractionState> = {
+    'idle': 'IDLE',
+    'starting': 'SEARCHING',
+    'searching': 'SEARCHING',
+    'scanning': 'SEARCHING',
+    'moving': 'APPROACHING',
+    'serving': 'SERVING',
+};
+
 const AutoPage: React.FC = () => {
     const { isAutonomous, setAutonomous } = useRobotStore();
     const [interactionState, setInteractionState] = useState<InteractionState>('IDLE');
     const [selectedAction, setSelectedAction] = useState<'TAKE' | 'ADD' | null>(null);
     const [, setSelectedDrink] = useState<any>(null);
 
-    const toggleAuto = () => {
+    // Listen for robot status updates from server
+    useEffect(() => {
+        const handleRobotStatus = (data: { status: string }) => {
+            console.log('Robot status:', data.status);
+            const newState = statusToState[data.status] || 'IDLE';
+            setInteractionState(newState);
+
+            if (data.status === 'idle') {
+                setAutonomous(false);
+            } else {
+                setAutonomous(true);
+            }
+        };
+
+        socket.on('robot_status', handleRobotStatus);
+        return () => {
+            socket.off('robot_status', handleRobotStatus);
+        };
+    }, [setAutonomous]);
+
+    const toggleAuto = async () => {
         const newState = !isAutonomous;
-        setAutonomous(newState);
-        if (newState) {
-            setInteractionState('SEARCHING');
-            // Simulate AI Flow
-            setTimeout(() => setInteractionState('APPROACHING'), 2500);
-            setTimeout(() => setInteractionState('INTERACTING'), 5000);
-        } else {
-            setInteractionState('IDLE');
+
+        try {
+            if (newState) {
+                // Start the robot
+                const response = await fetch('http://localhost:3000/api/v1/robot/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (response.ok) {
+                    setAutonomous(true);
+                    setInteractionState('SEARCHING');
+                } else {
+                    console.error('Failed to start robot');
+                }
+            } else {
+                // Stop the robot
+                const response = await fetch('http://localhost:3000/api/v1/robot/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (response.ok) {
+                    setAutonomous(false);
+                    setInteractionState('IDLE');
+                } else {
+                    console.error('Failed to stop robot');
+                }
+            }
+        } catch (error) {
+            console.error('Error toggling robot:', error);
         }
     };
 

@@ -7,20 +7,9 @@ import { logger } from './utils/logger';
 const server = http.createServer(app);
 
 // WebSocket Setup
-const io = new Server(server, {
-    cors: {
-        origin: config.corsOrigin,
-        methods: ['GET', 'POST'],
-    },
-});
+import { socketService } from './services/socket.service';
 
-io.on('connection', (socket) => {
-    logger.info(`Client connected: ${socket.id}`);
-
-    socket.on('disconnect', () => {
-        logger.info(`Client disconnected: ${socket.id}`);
-    });
-});
+socketService.initialize(server);
 
 // Start Server
 server.listen(config.port, () => {

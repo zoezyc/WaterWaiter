@@ -14,5 +14,7 @@ app.get('/health', (req, res) => {
 });
 
 import apiRoutes from './routes/api.routes';
+import robotRoutes from './routes/robot.routes';
 
 app.use('/api/v1', apiRoutes);
+app.use('/api/v1', robotRoutes);
