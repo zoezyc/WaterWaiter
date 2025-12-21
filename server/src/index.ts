@@ -1,14 +1,12 @@
 import http from 'http';
-import { Server } from 'socket.io';
 import { app } from './app';
 import { config } from './config';
 import { logger } from './utils/logger';
+import { socketService } from './services/socket.service';
 
 const server = http.createServer(app);
 
-// WebSocket Setup
-import { socketService } from './services/socket.service';
-
+// WebSocket Setup - use socketService so controllers can emit events
 socketService.initialize(server);
 
 // Start Server

@@ -89,15 +89,20 @@ async def person_detect(detector: VisionClient, base: Base):
                                 await base.stop()
                                 base_state = "stopped"
                             else:
-                                print(f"Close enough! Serving... bbox height: {bbox_height}px")
+                                print(f"Close enough! Waiting for customer... bbox height: {bbox_height}px")
                                 base_state = "serving"
                                 await base.stop()
                                 await update_status(session, "serving")
                                 
-                                # Simulate serving task - wait 3 seconds then resume
-                                await asyncio.sleep(3)
-                                print("Serving complete. Resuming search...")
-                                await update_status(session, "searching")
+                                # Wait for customer to interact with dashboard
+                                print("Waiting for customer to finish...")
+                                while True:
+                                    cmd = await get_command(session)
+                                    if cmd == "proceed":
+                                        print("Customer done. Resuming search...")
+                                        await update_status(session, "searching")
+                                        break
+                                    await asyncio.sleep(1)
                         else:
                             print("Invalid bounding box height.")
 

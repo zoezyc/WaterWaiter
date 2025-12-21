@@ -4,8 +4,27 @@ import { Activity, Bot, Gamepad2, LayoutDashboard, Coffee, AlertCircle, LogOut, 
 import { useRobotStore } from '../store/robot.store';
 import clsx from 'clsx';
 
+import { supabase } from '../services/supabase';
+import type { Session } from '@supabase/supabase-js';
+
 const Layout: React.FC = () => {
     const { isConnected } = useRobotStore();
+    const [session, setSession] = React.useState<Session | null>(null);
+
+    React.useEffect(() => {
+        if (!supabase) return;
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setSession(session);
+        });
+
+        const {
+            data: { subscription },
+        } = supabase.auth.onAuthStateChange((_event, session) => {
+            setSession(session);
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
 
     const navItems = [
         { to: '/', label: 'Robot', icon: Bot },
@@ -47,18 +66,33 @@ const Layout: React.FC = () => {
                 </nav>
 
                 <div className="p-4 border-t border-gray-700 space-y-4">
-                    {/* Log Out Button */}
-                    <button
-                        onClick={() => {
-                            // Placeholder for logout logic
-                            alert("Logging out...");
-                            window.location.href = '/login';
-                        }}
-                        className="flex items-center space-x-3 text-gray-400 hover:text-red-400 transition-colors w-full px-2"
-                    >
-                        <LogOut size={20} />
-                        <span className="font-medium">Log Out</span>
-                    </button>
+                    {/* Auth Status */}
+                    {session ? (
+                        <div className="space-y-2">
+                            <div className="px-2 text-xs text-gray-500 truncate">
+                                {session.user.email}
+                            </div>
+                            <button
+                                onClick={async () => {
+                                    await supabase?.auth.signOut();
+                                    setSession(null);
+                                    window.location.href = '/login';
+                                }}
+                                className="flex items-center space-x-3 text-gray-400 hover:text-red-400 transition-colors w-full px-2"
+                            >
+                                <LogOut size={20} />
+                                <span className="font-medium">Log Out</span>
+                            </button>
+                        </div>
+                    ) : (
+                        <button
+                            onClick={() => window.location.href = '/login'}
+                            className="flex items-center space-x-3 text-gray-400 hover:text-blue-400 transition-colors w-full px-2"
+                        >
+                            <LogOut size={20} className="rotate-180" />
+                            <span className="font-medium">Log In</span>
+                        </button>
+                    )}
 
                     {/* Connection Status Footer */}
                     <div className="flex items-center space-x-2 px-2">

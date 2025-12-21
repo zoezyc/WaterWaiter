@@ -1,47 +1,81 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Pause, User, Check, Coffee } from 'lucide-react';
+import { Play, Pause, User, Check, Coffee, AlertCircle, Calendar, Bot, LogOut } from 'lucide-react';
 import clsx from 'clsx';
 import { useRobotStore } from '../store/robot.store';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../services/supabase';
 import { socket } from '../socket';
 
-// Setup Supabase (mocking env vars for now - user should have filled them)
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-// Safely initialize or return null if missing (prevents white screen crash)
-const supabase = (supabaseUrl && supabaseKey)
-    ? createClient(supabaseUrl, supabaseKey)
-    : null;
-
-type InteractionState = 'IDLE' | 'SEARCHING' | 'APPROACHING' | 'INTERACTING' | 'SELECTING_DRINK' | 'PROCESSING' | 'SERVING';
-
-// Mock drinks list (ideally fetched from DB)
-const DRINKS_OPTIONS = [
-    { id: 1, name: 'Water', icon: '💧' },
-    { id: 2, name: 'Cola', icon: '🥤' },
-    { id: 3, name: 'Orange Soda', icon: '🍊' },
-    { id: 4, name: 'Coffee', icon: '☕' },
-];
-
 // Map robot status to UI interaction state
-const statusToState: Record<string, InteractionState> = {
+const statusToState: Record<string, 'IDLE' | 'SEARCHING' | 'APPROACHING' | 'INTERACTING' | 'SERVING'> = {
     'idle': 'IDLE',
     'starting': 'SEARCHING',
     'searching': 'SEARCHING',
     'scanning': 'SEARCHING',
     'moving': 'APPROACHING',
-    'serving': 'SERVING',
+    'serving': 'INTERACTING',  // Show customer interaction UI when close
 };
+
+// Unified Interface: Merges Event Menu (What should be there) with Inventory (What is there)
+interface MenuItem {
+    drink_id: string;
+    drink_name: string;
+
+    // Inventory Data (Nullable if not yet stocked)
+    inventory_id: string | null;
+    current_quantity: number;
+
+    // Limits
+    max_event_quantity: number;
+}
+
+interface EventOption {
+    id: string;
+    event_type: string;
+    description: string;
+}
+
+interface RobotOption {
+    id: string;
+    robot_name: string;
+}
+
+// Map some icons based on name for visual flair
+const getIcon = (name: string) => {
+    const n = name.toLowerCase();
+    if (n.includes('water')) return '💧';
+    if (n.includes('coffee') || n.includes('latte')) return '☕';
+    if (n.includes('soda') || n.includes('cola')) return '🥤';
+    if (n.includes('juice') || n.includes('orange')) return '🧃';
+    if (n.includes('tea')) return '🍵';
+    return '🥛';
+};
+
+type InteractionState = 'IDLE' | 'SEARCHING' | 'APPROACHING' | 'INTERACTING' | 'SELECTING_DRINK' | 'PROCESSING' | 'SERVING' | 'ERROR';
 
 const AutoPage: React.FC = () => {
     const { isAutonomous, setAutonomous } = useRobotStore();
     const [interactionState, setInteractionState] = useState<InteractionState>('IDLE');
-    const [selectedAction, setSelectedAction] = useState<'TAKE' | 'ADD' | null>(null);
-    const [, setSelectedDrink] = useState<any>(null);
 
-    // Listen for robot status updates from server
+    // Context Selection
+    const [events, setEvents] = useState<EventOption[]>([]);
+    const [selectedEventId, setSelectedEventId] = useState<string>('');
+
+    // Robot Context (Simulating "This Device")
+    const [currentRobot, setCurrentRobot] = useState<RobotOption | null>(null);
+
+    const [selectedAction, setSelectedAction] = useState<'TAKE' | 'ADD' | null>(null);
+    const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
+    const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+
+    const [showRefillModal, setShowRefillModal] = useState(false);
+    const [refillAmount, setRefillAmount] = useState<number>(1);
+    const [pendingRefillItem, setPendingRefillItem] = useState<MenuItem | null>(null);
+
     useEffect(() => {
+        fetchEvents();
+        fetchRobots();
+
+        // Listen for robot status updates from server
         const handleRobotStatus = (data: { status: string }) => {
             console.log('Robot status:', data.status);
             const newState = statusToState[data.status] || 'IDLE';
@@ -60,7 +94,97 @@ const AutoPage: React.FC = () => {
         };
     }, [setAutonomous]);
 
+    useEffect(() => {
+        if (interactionState === 'SELECTING_DRINK') {
+            fetchMenu();
+        }
+    }, [interactionState]);
+
+    const fetchEvents = async () => {
+        if (!supabase) return;
+        const { data } = await supabase
+            .from('events')
+            .select('id, event_type, description')
+            .order('created_at', { ascending: false });
+        if (data) setEvents(data);
+    };
+
+    const fetchRobots = async () => {
+        if (!supabase) return;
+        // Logic: For now, grab the first Robot found in DB to be "Me"
+        const { data } = await supabase
+            .from('robot')
+            .select('id, robot_name')
+            .limit(1)
+            .single();
+
+        if (data) {
+            setCurrentRobot(data);
+        }
+    };
+
+    const fetchMenu = async () => {
+        if (!supabase || !selectedEventId || !currentRobot) return;
+
+        // 1. Fetch Event Menu (The "Truth" for this event)
+        const { data: eventDrinks, error: edError } = await supabase
+            .from('event_drinks')
+            .select(`
+                drink_id, 
+                max_quantity,
+                drink_types (id, name)
+            `)
+            .eq('event_id', selectedEventId);
+
+        if (edError || !eventDrinks) {
+            console.error(edError);
+            return;
+        }
+
+        if (eventDrinks.length === 0) {
+            setMenuItems([]);
+            return;
+        }
+
+        const drinkIds = eventDrinks.map(ed => ed.drink_id);
+
+        // 2. Fetch SCOPED Robot Inventory (New Table)
+        // robot_event_inventory filtered by THIS robot and THIS event
+        const { data: inventoryData } = await supabase
+            .from('robot_event_inventory')
+            .select('id, drink_id, current_quantity')
+            .eq('robot_id', currentRobot.id)
+            .eq('event_id', selectedEventId)
+            .in('drink_id', drinkIds);
+
+        // 3. Merge Lists
+        const merged: MenuItem[] = eventDrinks.map(ed => {
+            const inv = inventoryData?.find(i => i.drink_id === ed.drink_id);
+            // @ts-ignore
+            const drinkName = ed.drink_types?.name || 'Unknown';
+
+            return {
+                drink_id: ed.drink_id,
+                drink_name: drinkName,
+                max_event_quantity: ed.max_quantity,
+                inventory_id: inv ? inv.id : null,
+                current_quantity: inv ? inv.current_quantity : 0
+            };
+        });
+
+        setMenuItems(merged);
+    };
+
     const toggleAuto = async () => {
+        if (!selectedEventId) {
+            alert("Please select an Active Event first.");
+            return;
+        }
+        if (!currentRobot) {
+            alert("No Robot ID found. Please create a robot in the database first.");
+            return;
+        }
+
         const newState = !isAutonomous;
 
         try {
@@ -101,79 +225,249 @@ const AutoPage: React.FC = () => {
         setInteractionState('SELECTING_DRINK');
     };
 
-    const handleDrinkSelection = async (drink: any) => {
-        setSelectedDrink(drink);
+    const handleDrinkSelection = async (item: MenuItem) => {
+        if (selectedAction === 'ADD') {
+            setPendingRefillItem(item);
+            setRefillAmount(item.max_event_quantity - item.current_quantity > 0 ? item.max_event_quantity - item.current_quantity : 1); // Default to fill up
+            setShowRefillModal(true);
+            return;
+        }
+
+        // Ensure manual mode respects selection
+        processDrinkAction(item, null);
+    };
+
+    const processDrinkAction = async (item: MenuItem, quantityToAddOverride: number | null) => {
+        setSelectedItem(item);
         setInteractionState('PROCESSING');
 
-        // Logic to send to Supabase
+        if (!supabase || !currentRobot) return;
+
         try {
-            if (supabase) {
-                // In a real app: await supabase.from('logs').insert(...)
-                console.log(`[SUPABASE] Sending: ${selectedAction} - ${drink.name}`);
-            } else {
-                console.warn('[SUPABASE] Client not initialized (check .env VITE_ vars)');
+            if (selectedAction === 'TAKE') {
+                if (!item.inventory_id || item.current_quantity <= 0) {
+                    alert("Out of stock! Please restock first.");
+                    setInteractionState(isAutonomous ? 'INTERACTING' : 'IDLE'); // Return to correct state
+                    return;
+                }
+
+                const newQuantity = item.current_quantity - 1;
+
+                // Optimistic UI
+                setMenuItems(prev => prev.map(m => m.drink_id === item.drink_id ? { ...m, current_quantity: newQuantity } : m));
+                setSelectedItem({ ...item, current_quantity: newQuantity });
+
+                const { error } = await supabase
+                    .from('robot_event_inventory')
+                    .update({ current_quantity: newQuantity, last_updated: new Date().toISOString() })
+                    .eq('id', item.inventory_id);
+
+                if (error) throw error;
+
+            } else if (selectedAction === 'ADD') {
+                const quantityToAdd = quantityToAddOverride || 1;
+                const newQuantity = item.current_quantity + quantityToAdd;
+
+                // Optimistic UI
+                setMenuItems(prev => prev.map(m => m.drink_id === item.drink_id ? { ...m, current_quantity: newQuantity } : m));
+                setSelectedItem({ ...item, current_quantity: newQuantity });
+
+                // UPSERT with UNIQUE constraint
+                const { error } = await supabase
+                    .from('robot_event_inventory')
+                    .upsert({
+                        id: item.inventory_id || undefined,
+                        robot_id: currentRobot.id,
+                        event_id: selectedEventId,
+                        drink_id: item.drink_id,
+                        current_quantity: newQuantity,
+                        max_quantity: item.max_event_quantity,
+                        last_updated: new Date().toISOString()
+                    }, { onConflict: 'robot_id, event_id, drink_id' });
+
+                if (error) {
+                    console.error("Upsert failed", error);
+                    throw error;
+                }
+
+                if (!item.inventory_id) {
+                    fetchMenu();
+                }
             }
 
-            // Simulate network delay
             await new Promise(resolve => setTimeout(resolve, 1500));
 
             setInteractionState('SERVING');
-            // Reset after service
-            setTimeout(() => {
-                setInteractionState('SEARCHING'); // Loop back to finding next person
+            setTimeout(async () => {
+                // Send proceed command to robot so it moves to next customer
+                if (isAutonomous) {
+                    try {
+                        await fetch('http://localhost:3000/api/v1/robot/interact', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ command: 'proceed' })
+                        });
+                    } catch (error) {
+                        console.error('Error sending proceed command:', error);
+                    }
+                    setInteractionState('SEARCHING');
+                } else {
+                    setInteractionState('IDLE');
+                }
                 setSelectedAction(null);
-                setSelectedDrink(null);
+                setSelectedItem(null);
             }, 3000);
 
-        } catch (error) {
-            console.error('Failed to log to Supabase:', error);
-            setInteractionState('INTERACTING'); // Go back on error
+        } catch (error: any) {
+            console.error('Failed to update Supabase:', error);
+            alert('Transaction failed: ' + error.message);
+            fetchMenu();
+            setInteractionState(isAutonomous ? 'INTERACTING' : 'IDLE');
         }
     };
 
-    const handleEnd = () => {
-        setInteractionState('SEARCHING');
+    const confirmRefill = () => {
+        if (pendingRefillItem && refillAmount > 0) {
+            processDrinkAction(pendingRefillItem, refillAmount);
+            setShowRefillModal(false);
+            setPendingRefillItem(null);
+        }
+    };
+
+    const handleEnd = async () => {
+        // Send proceed command to robot so it moves to next customer
+        try {
+            await fetch('http://localhost:3000/api/v1/robot/interact', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: 'proceed' })
+            });
+            setSelectedAction(null);
+            setSelectedItem(null);
+            // State will update via socket when robot sends new status
+        } catch (error) {
+            console.error('Error sending proceed command:', error);
+            // Fallback: just reset UI state
+            setInteractionState(isAutonomous ? 'SEARCHING' : 'IDLE');
+        }
     };
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full relative">
+
+            {/* Refill Modal */}
+            {showRefillModal && pendingRefillItem && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                        <h3 className="text-xl font-bold mb-2">Restock {pendingRefillItem.drink_name}</h3>
+                        <p className="text-gray-400 text-sm mb-6">Current: {pendingRefillItem.current_quantity} / Max: {pendingRefillItem.max_event_quantity}</p>
+
+                        <label className="block text-xs font-semibold text-gray-400 mb-2 uppercase">Quantity to Add</label>
+                        <input
+                            type="number"
+                            min="1"
+                            value={refillAmount}
+                            onChange={(e) => setRefillAmount(parseInt(e.target.value) || 0)}
+                            className="w-full bg-gray-900 border border-gray-600 rounded-lg p-4 text-2xl font-bold text-center text-white focus:border-blue-500 outline-none mb-6"
+                        />
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <button
+                                onClick={() => setShowRefillModal(false)}
+                                className="py-3 px-4 rounded-xl bg-gray-700 hover:bg-gray-600 font-semibold transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmRefill}
+                                className="py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold transition shadow-lg shadow-blue-900/40"
+                            >
+                                Confirm Restock
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Logic & Control Panel */}
             <div className="lg:col-span-1 space-y-6">
-                <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 h-full flex flex-col justify-between">
-                    <div>
-                        <h2 className="text-xl font-bold mb-6">Autonomous Brain</h2>
+                <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 h-full flex flex-col">
+                    <h2 className="text-xl font-bold mb-6 flex items-center">
+                        Autonomous Brain
+                        {currentRobot && (
+                            <span className="ml-auto text-xs bg-blue-600 px-2 py-1 rounded text-white flex items-center">
+                                <Bot size={12} className="mr-1" />
+                                {currentRobot.robot_name}
+                            </span>
+                        )}
+                    </h2>
 
-                        <div className="space-y-4">
-                            <div className={clsx("p-4 rounded-lg border flex items-center justify-between", interactionState === 'SEARCHING' ? "bg-blue-900/30 border-blue-500" : "bg-gray-900 border-gray-800")}>
-                                <span>1. Search</span>
-                                {interactionState === 'SEARCHING' && <span className="animate-pulse text-blue-400">●</span>}
-                            </div>
-                            <div className={clsx("p-4 rounded-lg border flex items-center justify-between", interactionState === 'APPROACHING' ? "bg-yellow-900/30 border-yellow-500" : "bg-gray-900 border-gray-800")}>
-                                <span>2. Approach</span>
-                                {interactionState === 'APPROACHING' && <span className="animate-pulse text-yellow-400">●</span>}
-                            </div>
-                            <div className={clsx("p-4 rounded-lg border flex items-center justify-between", ['INTERACTING', 'SELECTING_DRINK', 'PROCESSING'].includes(interactionState) ? "bg-purple-900/30 border-purple-500" : "bg-gray-900 border-gray-800")}>
-                                <span>3. Interact</span>
-                                {['INTERACTING', 'SELECTING_DRINK', 'PROCESSING'].includes(interactionState) && <span className="animate-pulse text-purple-400">●</span>}
-                            </div>
-                            <div className={clsx("p-4 rounded-lg border flex items-center justify-between", interactionState === 'SERVING' ? "bg-green-900/30 border-green-500" : "bg-gray-900 border-gray-800")}>
-                                <span>4. Serve/Task</span>
-                                {interactionState === 'SERVING' && <span className="animate-pulse text-green-400">●</span>}
-                            </div>
+                    {/* Event Selector */}
+                    <div className="mb-8">
+                        <label className="block text-sm font-medium text-gray-400 mb-2 flex items-center">
+                            <Calendar size={16} className="mr-2" />
+                            Active Event Context
+                        </label>
+                        <select
+                            value={selectedEventId}
+                            onChange={(e) => {
+                                if (isAutonomous) {
+                                    alert("Stop the waiter before changing events.");
+                                    return;
+                                }
+                                setSelectedEventId(e.target.value);
+                            }}
+                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:border-blue-500 outline-none transition"
+                        >
+                            <option value="">-- Select Event --</option>
+                            {events.map(ev => (
+                                <option key={ev.id} value={ev.id}>
+                                    {ev.event_type} {ev.description ? `(${ev.description})` : ''}
+                                </option>
+                            ))}
+                        </select>
+                        {!selectedEventId && (
+                            <p className="text-xs text-yellow-500 mt-2 flex items-center">
+                                <AlertCircle size={12} className="mr-1" />
+                                Select an event to start.
+                            </p>
+                        )}
+                    </div>
+
+                    <div className="space-y-4 flex-1">
+                        <div className={clsx("p-4 rounded-lg border flex items-center justify-between", interactionState === 'SEARCHING' ? "bg-blue-900/30 border-blue-500" : "bg-gray-900 border-gray-800")}>
+                            <span>1. Search</span>
+                            {interactionState === 'SEARCHING' && <span className="animate-pulse text-blue-400">●</span>}
+                        </div>
+                        <div className={clsx("p-4 rounded-lg border flex items-center justify-between", interactionState === 'APPROACHING' ? "bg-yellow-900/30 border-yellow-500" : "bg-gray-900 border-gray-800")}>
+                            <span>2. Approach</span>
+                            {interactionState === 'APPROACHING' && <span className="animate-pulse text-yellow-400">●</span>}
+                        </div>
+                        <div className={clsx("p-4 rounded-lg border flex items-center justify-between", ['INTERACTING', 'SELECTING_DRINK', 'PROCESSING'].includes(interactionState) ? "bg-purple-900/30 border-purple-500" : "bg-gray-900 border-gray-800")}>
+                            <span>3. Interact</span>
+                            {['INTERACTING', 'SELECTING_DRINK', 'PROCESSING'].includes(interactionState) && <span className="animate-pulse text-purple-400">●</span>}
+                        </div>
+                        <div className={clsx("p-4 rounded-lg border flex items-center justify-between", interactionState === 'SERVING' ? "bg-green-900/30 border-green-500" : "bg-gray-900 border-gray-800")}>
+                            <span>4. Serve/Task</span>
+                            {interactionState === 'SERVING' && <span className="animate-pulse text-green-400">●</span>}
                         </div>
                     </div>
 
                     <button
                         onClick={toggleAuto}
+                        disabled={!selectedEventId || !currentRobot}
                         className={clsx(
                             "w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center space-x-2 transition-all mt-8",
                             isAutonomous
                                 ? "bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-900/40"
-                                : "bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-900/40"
+                                : (!selectedEventId || !currentRobot)
+                                    ? "bg-gray-700 text-gray-500 cursor-not-allowed"
+                                    : "bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-900/40"
                         )}
                     >
                         {isAutonomous ? <><Pause /> <span>STOP WAITER</span></> : <><Play /> <span>START WAITER</span></>}
                     </button>
+                    {!currentRobot && <p className="text-center text-xs text-red-400">Error: No Robot Link Found in Database</p>}
                 </div>
             </div>
 
@@ -183,13 +477,47 @@ const AutoPage: React.FC = () => {
                     <div className="absolute top-4 left-4 bg-gray-800 px-3 py-1 rounded-full text-xs text-gray-500 border border-gray-700">
                         ROBOT TABLET SCREEN
                     </div>
+                    {selectedEventId && (
+                        <div className="absolute top-4 right-4 bg-blue-500/10 border border-blue-500/30 px-3 py-1 rounded-full text-xs text-blue-400 font-bold">
+                            EVENT MODE: {events.find(e => e.id === selectedEventId)?.event_type.toUpperCase()}
+                        </div>
+                    )}
+
+                    {!isAutonomous && currentRobot && selectedEventId && interactionState === 'IDLE' && (
+                        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-yellow-500/10 border border-yellow-500/30 px-3 py-1 rounded-full text-xs text-yellow-400 font-bold animate-pulse">
+                            MANUAL OVERRIDE ENABLED
+                        </div>
+                    )}
 
                     {/* Screens */}
+
+                    {/* Main Screens */}
+
+                    {/* IDLE STATE: Manual Control - RESTOCK ONLY */}
                     {interactionState === 'IDLE' && (
-                        <div className="text-gray-600">
-                            <h3 className="text-2xl font-bold">Auto Mode Disabled</h3>
-                            <p>Enable autonomous mode to start the waiter workflow.</p>
-                        </div>
+                        selectedEventId ? (
+                            <div className="space-y-8 w-full max-w-lg animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                <div className="text-center mb-8">
+                                    <h2 className="text-4xl font-bold text-white mb-2">Manual Control</h2>
+                                    <p className="text-gray-400">Autonomous Mode is OFF. Staff controls enabled.</p>
+                                </div>
+                                <div className="flex justify-center">
+                                    <button
+                                        onClick={() => handleInitialChoice('ADD')}
+                                        className="w-full max-w-sm p-8 bg-blue-900/50 hover:bg-blue-800/80 border border-blue-500/30 rounded-2xl transition flex flex-col items-center gap-4 hover:scale-105 shadow-xl shadow-blue-900/20"
+                                    >
+                                        <Check size={48} className="text-blue-400" />
+                                        <span className="font-bold text-2xl text-blue-100">Add Inventory</span>
+                                        <span className="text-sm text-blue-300">Restock Drinks & Cups</span>
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="text-gray-600">
+                                <h3 className="text-2xl font-bold">Waiting for Event...</h3>
+                                <p>Select an Active Event to enable controls.</p>
+                            </div>
+                        )
                     )}
 
                     {(interactionState === 'SEARCHING' || interactionState === 'APPROACHING') && (
@@ -201,53 +529,80 @@ const AutoPage: React.FC = () => {
                         </div>
                     )}
 
+                    {/* INTERACTING STATE: Customer Service - TAKE ONLY */}
                     {interactionState === 'INTERACTING' && (
                         <div className="space-y-8 w-full max-w-lg animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <h2 className="text-4xl font-bold text-white mb-8">Hello! How can I help?</h2>
-                            <div className="grid grid-cols-2 gap-6">
+                            <div className="grid grid-cols-2 gap-6 h-48">
                                 <button
                                     onClick={() => handleInitialChoice('TAKE')}
-                                    className="p-8 bg-purple-600 hover:bg-purple-700 rounded-2xl transition flex flex-col items-center gap-4 hover:scale-105"
+                                    className="h-full bg-purple-600 hover:bg-purple-700 rounded-2xl transition flex flex-col items-center justify-center gap-4 hover:scale-105 shadow-xl shadow-purple-900/40"
                                 >
-                                    <Coffee size={40} />
-                                    <span className="font-bold text-xl">Take a Drink</span>
+                                    <Coffee size={48} />
+                                    <span className="font-bold text-2xl">Take a Drink</span>
                                 </button>
+
                                 <button
-                                    onClick={() => handleInitialChoice('ADD')}
-                                    className="p-8 bg-blue-600 hover:bg-blue-700 rounded-2xl transition flex flex-col items-center gap-4 hover:scale-105"
+                                    onClick={handleEnd}
+                                    className="h-full bg-gray-700 hover:bg-gray-600 rounded-2xl transition flex flex-col items-center justify-center gap-4 hover:scale-105 text-gray-300 hover:text-white"
                                 >
-                                    <Check size={40} />
-                                    <span className="font-bold text-xl">Add Inventory</span>
+                                    <LogOut size={48} />
+                                    <span className="font-bold text-xl">No thanks,<br />Goodbye</span>
                                 </button>
                             </div>
-                            <button onClick={handleEnd} className="text-gray-400 hover:text-white mt-4">No thanks, goodbye</button>
                         </div>
                     )}
 
                     {interactionState === 'SELECTING_DRINK' && (
                         <div className="space-y-6 w-full max-w-lg animate-in fade-in zoom-in duration-300">
                             <h2 className="text-3xl font-bold text-white">
-                                {selectedAction === 'TAKE' ? "What would you like?" : "What are you adding?"}
+                                {selectedAction === 'TAKE' ? "What would you like?" : "Select item to restock:"}
                             </h2>
                             <div className="grid grid-cols-2 gap-4">
-                                {DRINKS_OPTIONS.map(drink => (
-                                    <button
-                                        key={drink.id}
-                                        onClick={() => handleDrinkSelection(drink)}
-                                        className="p-6 bg-gray-800 hover:bg-gray-700 hover:border-gray-500 border border-gray-700 rounded-xl transition flex items-center space-x-4 group"
-                                    >
-                                        <span className="text-2xl group-hover:scale-110 transition">{drink.icon}</span>
-                                        <span className="font-semibold text-lg">{drink.name}</span>
-                                    </button>
-                                ))}
+                                {menuItems.length === 0 ? (
+                                    <div className="col-span-2 p-8 text-gray-500 bg-gray-800 rounded-xl">
+                                        <AlertCircle className="mx-auto mb-2" />
+                                        <p>No drinks found on the menu for this event.</p>
+                                    </div>
+                                ) : (
+                                    menuItems.map(item => (
+                                        <button
+                                            key={item.drink_id}
+                                            onClick={() => handleDrinkSelection(item)}
+                                            className={clsx(
+                                                "p-6 bg-gray-800 border border-gray-700 rounded-xl transition flex items-center space-x-4 group relative overflow-hidden",
+                                                (selectedAction === 'TAKE' && item.current_quantity <= 0)
+                                                    ? "opacity-50 cursor-not-allowed"
+                                                    : "hover:bg-gray-700 hover:border-gray-500 hover:scale-[1.02]"
+                                            )}
+                                        >
+                                            <span className="text-2xl">
+                                                {getIcon(item.drink_name)}
+                                            </span>
+                                            <div className="text-left">
+                                                <span className="font-semibold text-lg block">{item.drink_name}</span>
+                                                <span className={clsx("text-xs", item.current_quantity > 0 ? "text-green-400" : "text-red-400")}>
+                                                    Stock: {item.current_quantity} / {item.max_event_quantity}
+                                                </span>
+                                            </div>
+                                            {item.max_event_quantity > 0 && (
+                                                <div className="absolute bottom-0 left-0 h-1 bg-gray-700 w-full">
+                                                    <div className="h-full bg-blue-500 transition-all" style={{ width: `${Math.min(100, (item.current_quantity / item.max_event_quantity) * 100)}%` }}></div>
+                                                </div>
+                                            )}
+                                        </button>
+                                    ))
+                                )}
                             </div>
-                            <button onClick={() => setInteractionState('INTERACTING')} className="text-sm text-gray-500 hover:text-white">Back</button>
+                            <button onClick={() => setInteractionState(isAutonomous ? 'INTERACTING' : 'IDLE')} className="text-sm text-gray-500 hover:text-white">Back</button>
                         </div>
                     )}
 
                     {interactionState === 'PROCESSING' && (
                         <div className="text-yellow-400 animate-pulse">
-                            <p className="text-2xl font-bold">Processing request...</p>
+                            <p className="text-2xl font-bold">
+                                {selectedAction === 'TAKE' ? "Dispensing" : "Restocking"} {selectedItem?.drink_name}...
+                            </p>
                         </div>
                     )}
 
@@ -256,8 +611,12 @@ const AutoPage: React.FC = () => {
                             <div className="w-24 h-24 rounded-full bg-green-500/10 mx-auto flex items-center justify-center mb-6">
                                 <Check size={48} />
                             </div>
-                            <h3 className="text-3xl font-bold text-white">Done!</h3>
-                            <p className="text-gray-400 mt-2">Inventory updated.</p>
+                            <h3 className="text-3xl font-bold text-white">
+                                {selectedAction === 'TAKE'
+                                    ? `Here is your ${selectedItem?.drink_name}!`
+                                    : `${selectedItem?.drink_name} Restocked!`}
+                            </h3>
+                            <p className="text-gray-400 mt-2">Current Stock: {selectedItem?.current_quantity} / {selectedItem?.max_event_quantity}</p>
                             <p className="text-sm text-gray-600 mt-8">Returning to patrol in 3s...</p>
                         </div>
                     )}

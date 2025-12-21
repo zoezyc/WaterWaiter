@@ -5,9 +5,17 @@ import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = Router();
 
-// Robot Routes
+// Robot Routes (no auth for robot script to call)
+router.post('/robot/start', robotController.startRobot);
+router.post('/robot/stop', robotController.stopRobot);
+router.get('/robot/running', robotController.isRobotRunning);
+router.post('/robot/status', robotController.updateStatus);
+router.get('/robot/command', robotController.getCommand);
+router.post('/robot/interact', robotController.sendCommand);
+
+// Legacy robot routes (with auth)
 router.post('/robot/connect', authMiddleware, robotController.connectRobot);
-router.get('/robot/status', authMiddleware, robotController.getRobotStatus);
+router.get('/robot/status-legacy', authMiddleware, robotController.getRobotStatus);
 router.post('/robot/control', authMiddleware, robotController.manualControl);
 
 // Drinks Routes

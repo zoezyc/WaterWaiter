@@ -1,21 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, Trash2, ChevronRight } from 'lucide-react';
+import { Calendar, Plus, Trash2, ChevronRight, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import clsx from 'clsx';
-import { createClient } from '@supabase/supabase-js';
-
-// Supabase setup
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
-
-interface Event {
-    id: string;
-    name: string;
-    date: string;
-    status: 'UPCOMING' | 'ACTIVE' | 'COMPLETED';
-    description: string;
-}
+import { supabase } from '../services/supabase';
+import type { Event } from '../types/supabase';
 
 const EventsPage: React.FC = () => {
     const navigate = useNavigate();
@@ -24,7 +11,7 @@ const EventsPage: React.FC = () => {
 
     // Form state
     const [isCreating, setIsCreating] = useState(false);
-    const [newEvent, setNewEvent] = useState({ name: '', date: '', description: '', status: 'UPCOMING' });
+    const [newEvent, setNewEvent] = useState({ event_type: '', description: '', event_size: 0 });
 
     useEffect(() => {
         fetchEvents();
@@ -33,18 +20,29 @@ const EventsPage: React.FC = () => {
     const fetchEvents = async () => {
         if (!supabase) return;
         setIsLoading(true);
-        const { data } = await supabase.from('events').select('*').order('date', { ascending: true });
-        if (data) setEvents(data as any);
+        const { data, error } = await supabase.from('events').select('*').order('created_at', { ascending: false });
+        if (error) console.error('Error fetching events:', error);
+        if (data) setEvents(data);
         setIsLoading(false);
     };
 
     const handleCreate = async () => {
         if (!supabase) return;
-        const { error } = await supabase.from('events').insert([newEvent]);
+        if (!newEvent.event_type) {
+            alert('Event Type is required');
+            return;
+        }
+
+        const { error } = await supabase.from('events').insert([{
+            event_type: newEvent.event_type,
+            description: newEvent.description,
+            event_size: newEvent.event_size || 0
+        }]);
+
         if (!error) {
             fetchEvents();
             setIsCreating(false);
-            setNewEvent({ name: '', date: '', description: '', status: 'UPCOMING' });
+            setNewEvent({ event_type: '', description: '', event_size: 0 });
         } else {
             alert('Error creating event: ' + error.message);
         }
@@ -56,19 +54,6 @@ const EventsPage: React.FC = () => {
 
         const { error } = await supabase.from('events').delete().eq('id', id);
         if (!error) fetchEvents();
-    };
-
-    const StatusBadge = ({ status }: { status: string }) => {
-        const colors = {
-            'UPCOMING': 'bg-blue-500/20 text-blue-400',
-            'ACTIVE': 'bg-green-500/20 text-green-400',
-            'COMPLETED': 'bg-gray-500/20 text-gray-400'
-        };
-        return (
-            <span className={clsx("px-2 py-1 rounded text-xs font-bold", colors[status as keyof typeof colors])}>
-                {status}
-            </span>
-        );
     };
 
     return (
@@ -93,17 +78,22 @@ const EventsPage: React.FC = () => {
                     <h3 className="text-lg font-bold mb-4">New Event Details</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <input
-                            placeholder="Event Name"
+                            placeholder="Event Type (e.g. Wedding, Conference)"
                             className="bg-gray-900 border border-gray-700 rounded p-2 text-white"
-                            value={newEvent.name}
-                            onChange={e => setNewEvent({ ...newEvent, name: e.target.value })}
+                            value={newEvent.event_type}
+                            onChange={e => setNewEvent({ ...newEvent, event_type: e.target.value })}
                         />
-                        <input
-                            type="datetime-local"
-                            className="bg-gray-900 border border-gray-700 rounded p-2 text-white"
-                            value={newEvent.date}
-                            onChange={e => setNewEvent({ ...newEvent, date: e.target.value })}
-                        />
+                        <div className="flex items-center bg-gray-900 border border-gray-700 rounded px-2">
+                            <Users size={16} className="text-gray-500 mr-2" />
+                            <input
+                                type="number"
+                                placeholder="Size"
+                                className="bg-transparent p-2 text-white w-full outline-none"
+                                value={newEvent.event_size}
+                                onChange={e => setNewEvent({ ...newEvent, event_size: parseInt(e.target.value) || 0 })}
+                            />
+                        </div>
+
                         <input
                             placeholder="Description"
                             className="bg-gray-900 border border-gray-700 rounded p-2 text-white md:col-span-2"
@@ -123,20 +113,22 @@ const EventsPage: React.FC = () => {
                     <div key={event.id} className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden hover:border-purple-500/50 transition group">
                         <div className="p-6">
                             <div className="flex justify-between items-start mb-4">
-                                <StatusBadge status={event.status} />
+                                <span className="bg-blue-500/20 text-blue-400 px-2 py-1 rounded text-xs font-bold">
+                                    {event.event_size} Guests
+                                </span>
                                 <div className="flex space-x-2 opacity-0 group-hover:opacity-100 transition">
                                     <button onClick={() => handleDelete(event.id)} className="p-1 hover:text-red-400"><Trash2 size={16} /></button>
                                 </div>
                             </div>
-                            <h3 className="text-xl font-bold mb-2">{event.name}</h3>
+                            <h3 className="text-xl font-bold mb-2">{event.event_type}</h3>
                             <div className="flex items-center text-gray-400 text-sm mb-4">
                                 <Calendar size={14} className="mr-2" />
-                                {new Date(event.date).toLocaleDateString()}
+                                {new Date(event.created_at).toLocaleDateString()}
                             </div>
-                            <p className="text-gray-500 text-sm line-clamp-2 mb-6">{event.description}</p>
+                            <p className="text-gray-500 text-sm line-clamp-2 mb-6">{event.description || 'No description'}</p>
 
                             <button
-                                onClick={() => navigate(`/drinks?eventId=${event.id}&eventName=${encodeURIComponent(event.name)}`)}
+                                onClick={() => navigate(`/drinks?eventId=${event.id}&eventName=${encodeURIComponent(event.event_type)}`)}
                                 className="w-full py-2 bg-gray-700 hover:bg-gray-600 rounded flex items-center justify-center space-x-2 text-sm font-medium transition"
                             >
                                 <span>Manage Inventory</span>

@@ -27,7 +27,6 @@ export const startRobot = async (req: Request, res: Response): Promise<void> => 
         logger.info(`Robot working directory: ${robotDir}`);
 
         // Use the venv Python which has aiohttp installed
-        // Path: Tipsy/.venv/Scripts/python.exe (from WaterWaiter/server, go ../../.venv)
         const pythonPath = path.join(process.cwd(), '..', '..', '.venv', 'Scripts', 'python.exe');
         logger.info(`Using Python: ${pythonPath}`);
 
@@ -169,18 +168,15 @@ export const isRobotRunning = async (req: Request, res: Response): Promise<void>
 // --- Legacy / Existing Methods Support ---
 
 export const connectRobot = async (req: Request, res: Response): Promise<void> => {
-    // Stub for existing logic
     logger.info('Connect robot called');
     res.json({ success: true, message: 'Robot connected (stub)' });
 };
 
 export const getRobotStatus = async (req: Request, res: Response): Promise<void> => {
-    // Return the shared state
     res.json({ status: currentStatus, success: true });
 };
 
 export const manualControl = async (req: Request, res: Response): Promise<void> => {
-    // Stub for manual control
     logger.info('Manual control called', req.body);
     res.json({ success: true, message: 'Manual control signal received' });
 };
