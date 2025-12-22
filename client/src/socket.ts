@@ -8,7 +8,7 @@ import { io } from 'socket.io-client';
 // or I'll check server/src/config.ts if I can.
 // Let's assume the API is at http://localhost:3000 for now or use window.location.hostname
 
-const SOCKET_URL = 'http://localhost:3000';
+const SOCKET_URL = '/';
 
 export const socket = io(SOCKET_URL, {
     autoConnect: true,

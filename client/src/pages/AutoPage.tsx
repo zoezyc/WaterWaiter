@@ -3,7 +3,7 @@ import { Play, Pause, User, Check, Coffee, AlertCircle, Calendar, Bot, LogOut } 
 import clsx from 'clsx';
 import { useRobotStore } from '../store/robot.store';
 import { supabase } from '../services/supabase';
-import { socket } from '../socket';
+
 
 // Map robot status to UI interaction state
 const statusToState: Record<string, 'IDLE' | 'SEARCHING' | 'APPROACHING' | 'INTERACTING' | 'SERVING'> = {
@@ -34,10 +34,8 @@ interface EventOption {
     description: string;
 }
 
-interface RobotOption {
-    id: string;
-    robot_name: string;
-}
+
+
 
 // Map some icons based on name for visual flair
 const getIcon = (name: string) => {
@@ -50,18 +48,19 @@ const getIcon = (name: string) => {
     return '🥛';
 };
 
-type InteractionState = 'IDLE' | 'SEARCHING' | 'APPROACHING' | 'INTERACTING' | 'SELECTING_DRINK' | 'PROCESSING' | 'SERVING' | 'ERROR';
+
+
 
 const AutoPage: React.FC = () => {
-    const { isAutonomous, setAutonomous } = useRobotStore();
-    const [interactionState, setInteractionState] = useState<InteractionState>('IDLE');
+    const {
+        isAutonomous, setAutonomous,
+        activeEventId: selectedEventId, setActiveEventId: setSelectedEventId,
+        activeRobot: currentRobot, setActiveRobot: setCurrentRobot,
+        interactionState, setInteractionState
+    } = useRobotStore();
 
     // Context Selection
     const [events, setEvents] = useState<EventOption[]>([]);
-    const [selectedEventId, setSelectedEventId] = useState<string>('');
-
-    // Robot Context (Simulating "This Device")
-    const [currentRobot, setCurrentRobot] = useState<RobotOption | null>(null);
 
     const [selectedAction, setSelectedAction] = useState<'TAKE' | 'ADD' | null>(null);
     const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
@@ -74,25 +73,7 @@ const AutoPage: React.FC = () => {
     useEffect(() => {
         fetchEvents();
         fetchRobots();
-
-        // Listen for robot status updates from server
-        const handleRobotStatus = (data: { status: string }) => {
-            console.log('Robot status:', data.status);
-            const newState = statusToState[data.status] || 'IDLE';
-            setInteractionState(newState);
-
-            if (data.status === 'idle') {
-                setAutonomous(false);
-            } else {
-                setAutonomous(true);
-            }
-        };
-
-        socket.on('robot_status', handleRobotStatus);
-        return () => {
-            socket.off('robot_status', handleRobotStatus);
-        };
-    }, [setAutonomous]);
+    }, []);
 
     useEffect(() => {
         if (interactionState === 'SELECTING_DRINK') {
@@ -190,7 +171,7 @@ const AutoPage: React.FC = () => {
         try {
             if (newState) {
                 // Start the robot
-                const response = await fetch('http://localhost:3000/api/v1/robot/start', {
+                const response = await fetch('/api/v1/robot/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 });
@@ -203,7 +184,7 @@ const AutoPage: React.FC = () => {
                 }
             } else {
                 // Stop the robot
-                const response = await fetch('http://localhost:3000/api/v1/robot/stop', {
+                const response = await fetch('/api/v1/robot/stop', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 });
@@ -302,7 +283,7 @@ const AutoPage: React.FC = () => {
                 // Send proceed command to robot so it moves to next customer
                 if (isAutonomous) {
                     try {
-                        await fetch('http://localhost:3000/api/v1/robot/interact', {
+                        await fetch('/api/v1/robot/interact', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ command: 'proceed' })
@@ -337,7 +318,7 @@ const AutoPage: React.FC = () => {
     const handleEnd = async () => {
         // Send proceed command to robot so it moves to next customer
         try {
-            await fetch('http://localhost:3000/api/v1/robot/interact', {
+            await fetch('/api/v1/robot/interact', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ command: 'proceed' })
@@ -409,7 +390,7 @@ const AutoPage: React.FC = () => {
                             Active Event Context
                         </label>
                         <select
-                            value={selectedEventId}
+                            value={selectedEventId || ''}
                             onChange={(e) => {
                                 if (isAutonomous) {
                                     alert("Stop the waiter before changing events.");
@@ -452,6 +433,8 @@ const AutoPage: React.FC = () => {
                             {interactionState === 'SERVING' && <span className="animate-pulse text-green-400">●</span>}
                         </div>
                     </div>
+
+
 
                     <button
                         onClick={toggleAuto}

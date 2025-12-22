@@ -3,22 +3,34 @@ import { socketService } from '../services/socket.service';
 import { logger } from '../utils/logger';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
+import { startCameraServer, isCameraServerRunning } from '../services/camera-process.service';
 
 // In-memory state
 let currentStatus: string = 'idle';
 let nextCommand: string | null = null;
 let robotProcess: ChildProcess | null = null;
+let manualProcess: ChildProcess | null = null; // Python script for manual control
 
 /**
- * Start the robot Python script
+ * Start the robot Python script (Autonomous)
  * POST /api/v1/robot/start
  */
 export const startRobot = async (req: Request, res: Response): Promise<void> => {
     try {
-        if (robotProcess) {
+        // Stop manual process if running to avoid conflict
+        if (manualProcess) {
+            manualProcess.kill();
+            manualProcess = null;
+        }
+
+        // Check if robot process exists and is actually running
+        if (robotProcess && !robotProcess.killed && robotProcess.exitCode === null) {
             res.status(400).json({ error: 'Robot is already running' });
             return;
         }
+
+        // Reset stale process reference
+        robotProcess = null;
 
         // Path from WaterWaiter/server to WaterWaiter/robot
         const robotScriptPath = path.join(process.cwd(), '..', 'robot', 'tipsy.py');
@@ -55,6 +67,18 @@ export const startRobot = async (req: Request, res: Response): Promise<void> => 
             robotProcess = null;
             currentStatus = 'idle';
             socketService.emit('robot_status', { status: 'idle' });
+
+            // Force kill any lingering python processes (Windows specific, aggressive but necessary for zombies)
+            if (process.platform === 'win32') {
+                spawn('taskkill', ['/F', '/IM', 'python.exe']);
+            }
+
+            // Restart camera server
+            setTimeout(() => {
+                if (!isCameraServerRunning()) {
+                    startCameraServer();
+                }
+            }, 2000);
         });
 
         currentStatus = 'starting';
@@ -68,18 +92,38 @@ export const startRobot = async (req: Request, res: Response): Promise<void> => 
 };
 
 /**
- * Stop the robot Python script
+ * Stop the robot Python script (Autonomous and Manual)
  * POST /api/v1/robot/stop
  */
 export const stopRobot = async (req: Request, res: Response): Promise<void> => {
     try {
-        if (!robotProcess) {
-            res.status(400).json({ error: 'Robot is not running' });
-            return;
+        let stoppedSomething = false;
+
+        if (robotProcess) {
+            robotProcess.kill('SIGTERM');
+            robotProcess = null;
+            stoppedSomething = true;
         }
 
-        robotProcess.kill('SIGTERM');
-        robotProcess = null;
+        if (manualProcess) {
+            manualProcess.kill('SIGTERM'); // kill the manual driver
+            manualProcess = null;
+            stoppedSomething = true;
+        }
+
+        if (!stoppedSomething) {
+            // Zombie cleanup: Force kill and restart camera specifically
+            if (process.platform === 'win32') {
+                spawn('taskkill', ['/F', '/IM', 'python.exe']);
+            }
+
+            setTimeout(() => {
+                if (!isCameraServerRunning()) {
+                    startCameraServer();
+                }
+            }, 2000);
+        }
+
         currentStatus = 'idle';
         socketService.emit('robot_status', { status: 'idle' });
 
@@ -97,17 +141,19 @@ export const stopRobot = async (req: Request, res: Response): Promise<void> => {
  */
 export const updateStatus = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { status } = req.body;
+        const payload = req.body;
+        const { status } = payload;
+
         if (!status) {
             res.status(400).json({ error: 'Status is required' });
             return;
         }
 
         currentStatus = status;
-        logger.info(`Robot status update: ${status}`);
+        logger.info(`Robot status update: ${status}`, { payload });
 
-        // Broadcast to frontend
-        socketService.emit('robot_status', { status });
+        // Broadcast to frontend (send everything including sensor data)
+        socketService.emit('robot_status', payload);
 
         res.json({ success: true, status });
     } catch (error) {
@@ -177,6 +223,46 @@ export const getRobotStatus = async (req: Request, res: Response): Promise<void>
 };
 
 export const manualControl = async (req: Request, res: Response): Promise<void> => {
-    logger.info('Manual control called', req.body);
-    res.json({ success: true, message: 'Manual control signal received' });
+    try {
+        // Expect { linear: {x,y,z}, angular: {x,y,z} }
+        const { linear, angular } = req.body;
+
+        // Ensure Autonomous script is not running?
+        // Ideally yes. But for now we just warn.
+        if (robotProcess) {
+            logger.warn('Manual control command received while Autonomous Mode is ACTIVE.');
+        }
+
+        // Spawn manual drive script if not running
+        if (!manualProcess || manualProcess.killed) {
+            const manualScriptPath = path.join(process.cwd(), '..', 'robot', 'manual_drive.py');
+            const robotDir = path.join(process.cwd(), '..', 'robot');
+            const pythonPath = path.join(process.cwd(), '..', '..', '.venv', 'Scripts', 'python.exe');
+
+            logger.info(`Spawning manual drive: ${manualScriptPath}`);
+            manualProcess = spawn(pythonPath, [manualScriptPath], {
+                cwd: robotDir,
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
+
+            manualProcess.stderr?.on('data', (data) => logger.error(`[Manual Drive Error]: ${data}`));
+            manualProcess.stdout?.on('data', (data) => logger.info(`[Manual Drive]: ${data}`));
+
+            manualProcess.on('close', (code) => {
+                logger.info(`Manual drive process exited with code ${code}`);
+                manualProcess = null;
+            });
+        }
+
+        // Send command via stdin
+        if (manualProcess && manualProcess.stdin) {
+            const cmdString = JSON.stringify({ linear, angular }) + '\n';
+            manualProcess.stdin.write(cmdString);
+        }
+
+        res.json({ success: true });
+    } catch (e) {
+        logger.error('Manual control error', e);
+        res.status(500).json({ error: 'Detailed control failed' });
+    }
 };

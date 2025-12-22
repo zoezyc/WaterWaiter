@@ -1,38 +1,112 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Joystick } from 'react-joystick-component';
-import { StopCircle, Zap } from 'lucide-react';
+import { StopCircle, Zap, AlertTriangle } from 'lucide-react';
 import { useRobotStore } from '../store/robot.store';
 import clsx from 'clsx';
+import type { IJoystickUpdateEvent } from 'react-joystick-component/build/lib/Joystick';
 
 const ManualPage: React.FC = () => {
-    const { } = useRobotStore();
+    const { isAutonomous } = useRobotStore();
     const [speed, setSpeed] = useState(50);
     const [lastCommand, setLastCommand] = useState<string>('STOP');
+    const lastSentTime = useRef<number>(0);
 
-    const handleMove = (event: any) => {
-        setLastCommand(`Vector: ${event.x?.toFixed(2)}, ${event.y?.toFixed(2)}`);
-        // TODO: Emit socket event
+    // Throttled command sender
+    const sendCommand = async (linear: { x: number, y: number, z: number }, angular: { x: number, y: number, z: number }) => {
+        const now = Date.now();
+        // Throttle to 100ms, unless it's a STOP command (all zeros) which should pass immediately
+        const isStop = linear.y === 0 && angular.z === 0;
+        if (!isStop && now - lastSentTime.current < 100) return;
+
+        lastSentTime.current = now;
+
+        try {
+            await fetch('/api/v1/robot/manual', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ linear, angular })
+            });
+        } catch (error) {
+            console.error("Failed to send manual command", error);
+        }
     };
 
-    const handleStop = () => {
+    const handleMove = (event: IJoystickUpdateEvent) => {
+        const x = event.x || 0;
+        const y = event.y || 0;
+        setLastCommand(`Vector: ${x.toFixed(2)}, ${y.toFixed(2)}`);
+
+        // Map Joystick (X: Left/Right, Y: Forward/Back) to Robot (Linear Y, Angular Z)
+        // Normalize speed factor (0.0 to 1.0) based on slider
+        const speedFactor = speed / 100;
+
+        const linear = { x: 0, y: y * speedFactor, z: 0 };
+        // Invert X for angular Z? Usually Left (negative X) -> Turn Left (positive Z).
+        // Try -x first.
+        const angular = { x: 0, y: 0, z: -x * speedFactor };
+
+        sendCommand(linear, angular);
+    };
+
+    const handleJoystickStop = () => {
         setLastCommand('STOP');
-        // TODO: Emit socket stop
+        sendCommand({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 });
+    };
+
+    // Emergency Stop / Full Stop
+    const handleEmergencyStop = async () => {
+        setLastCommand('EMERGENCY STOP');
+        try {
+            // Stops python script AND manual movement
+            await fetch('/api/v1/robot/stop', { method: 'POST' });
+        } catch (error) {
+            console.error("Failed to trigger emergency stop", error);
+        }
     };
 
     // Keyboard controls
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            const speedFactor = speed / 100;
+            // Constant velocity for keyboard press - simplistic implementation
+            // Real keyboard driving usually requires keyup handling or interval loop
+            // For now, we utilize the repeater:
+
+            let linear = { x: 0, y: 0, z: 0 };
+            let angular = { x: 0, y: 0, z: 0 };
+            let cmdName = '';
+
             switch (e.key) {
-                case 'ArrowUp': setLastCommand('FORWARD'); break;
-                case 'ArrowDown': setLastCommand('BACKWARD'); break;
-                case 'ArrowLeft': setLastCommand('LEFT'); break;
-                case 'ArrowRight': setLastCommand('RIGHT'); break;
-                case ' ': handleStop(); break;
+                case 'ArrowUp':
+                    linear.y = 1 * speedFactor; cmdName = 'FORWARD'; break;
+                case 'ArrowDown':
+                    linear.y = -1 * speedFactor; cmdName = 'BACKWARD'; break;
+                case 'ArrowLeft':
+                    angular.z = 1 * speedFactor; cmdName = 'LEFT'; break; // Positive Z = Left
+                case 'ArrowRight':
+                    angular.z = -1 * speedFactor; cmdName = 'RIGHT'; break; // Negative Z = Right
+                case ' ':
+                    handleEmergencyStop(); return;
+                default: return; // Ignore other keys
+            }
+
+            setLastCommand(cmdName);
+            sendCommand(linear, angular);
+        };
+
+        const handleKeyUp = (e: KeyboardEvent) => {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                handleJoystickStop();
             }
         };
+
         window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
+        window.addEventListener('keyup', handleKeyUp);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+        };
+    }, [speed]); // Re-bind when speed changes
 
     return (
         <div className="flex flex-col h-full space-y-6">
@@ -57,6 +131,13 @@ const ManualPage: React.FC = () => {
                 </div>
             </div>
 
+            {isAutonomous && (
+                <div className="bg-orange-900/40 border border-orange-500/50 p-4 rounded-xl flex items-center text-orange-200 animate-pulse">
+                    <AlertTriangle className="mr-3" />
+                    <span className="font-bold">WARNING: Autonomous Mode is active. Manual controls may conflict! Stop robot first.</span>
+                </div>
+            )}
+
             <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-8 items-center justify-items-center bg-gray-900/50 rounded-xl border border-gray-700/50 p-8">
                 {/* Virtual Joystick Zone */}
                 <div className="flex flex-col items-center space-y-4">
@@ -68,7 +149,7 @@ const ManualPage: React.FC = () => {
                             baseColor="#1f2937"
                             stickColor="#9333ea"
                             move={handleMove}
-                            stop={handleStop}
+                            stop={handleJoystickStop}
                         />
                     </div>
                 </div>
@@ -91,7 +172,7 @@ const ManualPage: React.FC = () => {
                 </div>
             </div>
 
-            <div className="bg-red-900/20 border border-red-900/50 p-4 rounded-xl flex items-center justify-between">
+            <div className="bg-red-900/20 border border-red-900/50 p-4 rounded-xl flex items-center justify-between cursor-pointer hover:bg-red-900/40 transition-colors" onClick={handleEmergencyStop}>
                 <div className="flex items-center text-red-400">
                     <StopCircle className="mr-2" size={24} />
                     <span className="font-bold">SAFETY OVERRIDE</span>

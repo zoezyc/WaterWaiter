@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as robotController from '../controllers/robot.controller';
 import * as drinksController from '../controllers/drinks.controller';
+import * as cameraController from '../controllers/camera.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -12,6 +13,10 @@ router.get('/robot/running', robotController.isRobotRunning);
 router.post('/robot/status', robotController.updateStatus);
 router.get('/robot/command', robotController.getCommand);
 router.post('/robot/interact', robotController.sendCommand);
+router.post('/robot/manual', robotController.manualControl);
+
+// Camera Routes (no auth for real-time streaming)
+router.get('/camera/frame', cameraController.getCameraFrame);
 
 // Legacy robot routes (with auth)
 router.post('/robot/connect', authMiddleware, robotController.connectRobot);
@@ -25,3 +30,4 @@ router.put('/drinks/:id', authMiddleware, drinksController.updateDrink);
 router.delete('/drinks/:id', authMiddleware, drinksController.deleteDrink);
 
 export default router;
+

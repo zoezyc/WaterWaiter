@@ -33,13 +33,17 @@ async def connect():
     return await RobotClient.at_address(robot_address, opts)
 
 
-async def update_status(session, status):
+async def update_status(session, status, extra_data=None):
     """Send robot status to dashboard API"""
+    payload = {"status": status}
+    if extra_data:
+        payload.update(extra_data)
+        
     try:
-        async with session.post(f"{API_URL}/status", json={"status": status}) as resp:
+        async with session.post(f"{API_URL}/status", json=payload) as resp:
             print(f"Status update '{status}': {resp.status}")
-    except Exception:
-        pass  # Silently fail if API is down
+    except Exception as e:
+        print(f"Failed to update status: {e}")
 
 
 async def get_command(session):
@@ -54,6 +58,35 @@ async def get_command(session):
     return "none"
 
 
+
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+def get_cpu_temp():
+    """Get CPU temperature in Celsius"""
+    temp = 0
+    try:
+        # Try psutil first (cross-platformish)
+        if psutil and hasattr(psutil, "sensors_temperatures"):
+            temps = psutil.sensors_temperatures()
+            if temps:
+                # Common names for CPU temp
+                for name in ['cpu_thermal', 'coretemp', 'k10temp']:
+                    if name in temps:
+                        temp = temps[name][0].current
+                        break
+        
+        # Fallback to Raspbian file
+        if temp == 0 and os.path.exists("/sys/class/thermal/thermal_zone0/temp"):
+             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+                 temp = int(f.read().strip()) / 1000.0
+    except Exception:
+        pass
+    
+    return round(temp, 1)
+
 async def person_detect(detector: VisionClient, base: Base):
     global base_state
     
@@ -61,7 +94,13 @@ async def person_detect(detector: VisionClient, base: Base):
         while True:
             try:
                 print("Looking for people...")
-                await update_status(session, "searching")
+                current_temp = get_cpu_temp()
+                await update_status(session, "searching", {
+                    "personDetected": False, 
+                    "bboxHeight": 0, 
+                    "detectionConfidence": 0,
+                    "cpuTemp": current_temp
+                })
                 
                 detections = await detector.get_detections_from_camera(camera_name)
                 found = False
@@ -75,6 +114,13 @@ async def person_detect(detector: VisionClient, base: Base):
                         # Calculate height in pixels
                         bbox_height = d.y_max - d.y_min
                         
+                        extra = {
+                            "personDetected": True,
+                            "bboxHeight": bbox_height,
+                            "detectionConfidence": d.confidence,
+                            "cpuTemp": get_cpu_temp()
+                        }
+
                         if bbox_height > 0:
                             # Use bounding box height directly (more reliable than distance calculation)
                             print(f"Person detected - bbox height: {bbox_height} pixels")
@@ -83,7 +129,7 @@ async def person_detect(detector: VisionClient, base: Base):
                             if bbox_height < 450:
                                 print("Path clear, moving straight.")
                                 base_state = "straight"
-                                await update_status(session, "moving")
+                                await update_status(session, "moving", extra)
                                 await base.set_power(linear={"x": 0, "y": 0.7, "z": 0}, angular={"x": 0, "y": 0, "z": 0})
                                 await asyncio.sleep(2)  # Move for 2 seconds
                                 await base.stop()
@@ -92,16 +138,25 @@ async def person_detect(detector: VisionClient, base: Base):
                                 print(f"Close enough! Waiting for customer... bbox height: {bbox_height}px")
                                 base_state = "serving"
                                 await base.stop()
-                                await update_status(session, "serving")
+                                await update_status(session, "serving", extra)
                                 
                                 # Wait for customer to interact with dashboard
                                 print("Waiting for customer to finish...")
+                                heartbeat_counter = 0
                                 while True:
                                     cmd = await get_command(session)
                                     if cmd == "proceed":
                                         print("Customer done. Resuming search...")
-                                        await update_status(session, "searching")
+                                        await update_status(session, "searching", {"personDetected": False})
                                         break
+                                    
+                                    # Periodic Heartbeat every 3 seconds to keep UI synced
+                                    heartbeat_counter += 1
+                                    if heartbeat_counter >= 3:
+                                         extra["cpuTemp"] = get_cpu_temp()
+                                         await update_status(session, "serving", extra)
+                                         heartbeat_counter = 0
+                                         
                                     await asyncio.sleep(1)
                         else:
                             print("Invalid bounding box height.")
@@ -109,7 +164,12 @@ async def person_detect(detector: VisionClient, base: Base):
                 if not found:
                     print("No person detected. Turning to look...")
                     base_state = "spinning"
-                    await update_status(session, "scanning")
+                    await update_status(session, "scanning", {
+                        "personDetected": False, 
+                        "bboxHeight": 0, 
+                        "detectionConfidence": 0,
+                        "cpuTemp": get_cpu_temp()
+                    })
                     await base.set_power(linear={"x": 0, "y": 0, "z": 0}, angular={"x": 0, "y": 0, "z": 0.5})
                     await asyncio.sleep(1)  # Spin for 1 second
                     await base.stop()

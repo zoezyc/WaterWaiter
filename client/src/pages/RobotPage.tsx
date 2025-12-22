@@ -15,7 +15,15 @@ const MetricCard = ({ icon: Icon, label, value, color, unit }: any) => (
 );
 
 const RobotPage: React.FC = () => {
-    const { cpuTemp, isConnected } = useRobotStore();
+    const { cpuTemp, isConnected, latency, latencyHistory, uptime } = useRobotStore();
+
+    // Format uptime
+    const formatUptime = (seconds: number) => {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    };
 
     return (
         <div className="space-y-8">
@@ -36,16 +44,16 @@ const RobotPage: React.FC = () => {
                 />
                 <MetricCard
                     icon={Wifi}
-                    label="Network Quality"
-                    value="Latency"
-                    unit="45ms"
+                    label="Network Latency"
+                    value={latency}
+                    unit="ms"
                     color="bg-blue-500"
                 />
                 <MetricCard
                     icon={Activity}
                     label="Uptime"
-                    value="--:--"
-                    unit="Hrs"
+                    value={formatUptime(uptime)}
+                    unit=""
                     color="bg-purple-500"
                 />
             </div>
@@ -59,13 +67,21 @@ const RobotPage: React.FC = () => {
                     </h3>
                     <div className="space-y-4">
                         <p className="text-sm text-gray-400">Connection to Backend: <span className="text-green-400 font-mono">Connected</span></p>
-                        <p className="text-sm text-gray-400">Connection to Viam: <span className={isConnected ? "text-green-400 font-mono" : "text-red-400 font-mono"}>{isConnected ? "Connected" : "Disconnected"}</span></p>
+                        <p className="text-sm text-gray-400">Robot Status: <span className={isConnected ? "text-green-400 font-mono" : "text-red-400 font-mono"}>{isConnected ? "Online" : "Offline"}</span></p>
 
                         <div className="h-32 bg-gray-900 rounded mt-4 flex items-end justify-center pb-2 px-2 space-x-1">
-                            {/* Fake Ping Graph */}
-                            {[40, 60, 45, 80, 50, 60, 40, 30, 70, 50, 45, 60].map((h, i) => (
-                                <div key={i} style={{ height: `${h}%` }} className="w-4 bg-blue-500/50 rounded-t-sm" />
-                            ))}
+                            {/* Latency Graph */}
+                            {latencyHistory && latencyHistory.length > 0 ? (
+                                latencyHistory.map((val, i) => {
+                                    // Normalize: 0ms -> 0%, 200ms -> 100%
+                                    const h = Math.min(100, Math.max(5, (val / 200) * 100));
+                                    return (
+                                        <div key={i} style={{ height: `${h}%` }} className="w-4 bg-blue-500/50 rounded-t-sm" title={`${val}ms`} />
+                                    );
+                                })
+                            ) : (
+                                <p className="text-xs text-gray-500 self-center">No Data</p>
+                            )}
                         </div>
                     </div>
                 </div>

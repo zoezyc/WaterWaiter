@@ -7,9 +7,119 @@ import clsx from 'clsx';
 import { supabase } from '../services/supabase';
 import type { Session } from '@supabase/supabase-js';
 
+import { socket } from '../socket';
+
+// Map robot status to UI interaction state
+const statusToState: Record<string, 'IDLE' | 'SEARCHING' | 'APPROACHING' | 'INTERACTING' | 'SERVING'> = {
+    'idle': 'IDLE',
+    'starting': 'SEARCHING',
+    'searching': 'SEARCHING',
+    'scanning': 'SEARCHING',
+    'moving': 'APPROACHING',
+    'serving': 'INTERACTING',
+};
+
 const Layout: React.FC = () => {
-    const { isConnected } = useRobotStore();
+    const {
+        isConnected,
+        setConnected,
+        setAutonomous,
+        setInteractionState,
+        updateStatusFull,
+        incrementUptime,
+        addLatencySample
+    } = useRobotStore();
+
     const [session, setSession] = React.useState<Session | null>(null);
+
+    React.useEffect(() => {
+        // Initial Fetch to sync state
+        const fetchRunning = async () => {
+            try {
+                const res = await fetch('/api/v1/robot/running');
+                if (res.ok) {
+                    const data = await res.json();
+                    setAutonomous(data.running);
+                }
+            } catch (e) {
+                console.error("Failed to sync initial robot state", e);
+            }
+        };
+        fetchRunning();
+
+        // Socket Listeners
+        // Socket Listeners
+        const onConnect = () => {
+            console.log("Socket Connected");
+            setConnected(true);
+        };
+
+        const onDisconnect = () => {
+            console.log("Socket Disconnected");
+            setConnected(false);
+        };
+
+        const onRobotStatus = (data: any) => {
+            // Update sensor data
+            updateStatusFull({
+                cpuTemp: data.cpuTemp || 55,
+                bboxHeight: data.bboxHeight || 0,
+                detectionConfidence: data.detectionConfidence || 0,
+                personDetected: data.personDetected || false,
+                // latency is updated by heartbeat now
+            });
+
+            // Update Interaction State
+            const status = data.status;
+            if (status) {
+                const newState = statusToState[status] || 'IDLE';
+                setInteractionState(newState);
+                setAutonomous(status !== 'idle');
+            }
+        };
+
+        const onConnectError = (err: any) => {
+            console.error("Socket Connection Error:", err);
+        };
+
+        socket.on('connect', onConnect);
+        socket.on('disconnect', onDisconnect);
+        socket.on('robot_status', onRobotStatus);
+        socket.on('connect_error', onConnectError);
+
+        // Uptime Timer
+        const uptimeTimer = setInterval(() => {
+            if (isConnected) incrementUptime();
+        }, 1000);
+
+        // Latency Heartbeat (Ping Backend)
+        const pingTimer = setInterval(async () => {
+            const start = Date.now();
+            try {
+                const res = await fetch('/api/v1/robot/running');
+                if (res.ok) {
+                    const end = Date.now();
+                    const latency = end - start;
+                    addLatencySample(latency);
+
+                    const data = await res.json();
+                    // Sync autonomous state periodically just in case socket missed it
+                    setAutonomous(data.running);
+                }
+            } catch (e) {
+                // console.error("Ping failed", e);
+            }
+        }, 2000);
+
+        return () => {
+            socket.off('connect', onConnect);
+            socket.off('disconnect', onDisconnect);
+            socket.off('robot_status', onRobotStatus);
+            socket.off('connect_error', onConnectError);
+            clearInterval(uptimeTimer);
+            clearInterval(pingTimer);
+        };
+    }, [isConnected]);
 
     React.useEffect(() => {
         if (!supabase) return;
@@ -25,6 +135,17 @@ const Layout: React.FC = () => {
 
         return () => subscription.unsubscribe();
     }, []);
+
+    const handleEmergencyStop = async () => {
+        try {
+            await fetch('/api/v1/robot/stop', { method: 'POST' });
+            setAutonomous(false);
+            setInteractionState('IDLE');
+        } catch (error) {
+            console.error('Emergency stop failed:', error);
+            alert('Failed to send emergency stop command');
+        }
+    };
 
     const navItems = [
         { to: '/', label: 'Robot', icon: Bot },
@@ -107,7 +228,9 @@ const Layout: React.FC = () => {
                 <header className="h-16 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6">
                     <h2 className="text-lg font-semibold">Dashboard</h2>
 
-                    <button className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md font-bold flex items-center space-x-2 shadow-lg shadow-red-900/50 hover:shadow-red-900/70 transition-all">
+                    <button
+                        onClick={handleEmergencyStop}
+                        className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md font-bold flex items-center space-x-2 shadow-lg shadow-red-900/50 hover:shadow-red-900/70 transition-all">
                         <AlertCircle size={20} />
                         <span>EMERGENCY STOP</span>
                     </button>
