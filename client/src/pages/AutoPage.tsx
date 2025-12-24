@@ -4,15 +4,14 @@ import clsx from 'clsx';
 import { useRobotStore } from '../store/robot.store';
 import { supabase } from '../services/supabase';
 
-
 // Map robot status to UI interaction state
+// New Schema Statuses: 'idle', 'moving', 'offering', 'returning', 'error'
 const statusToState: Record<string, 'IDLE' | 'SEARCHING' | 'APPROACHING' | 'INTERACTING' | 'SERVING'> = {
     'idle': 'IDLE',
-    'starting': 'SEARCHING',
-    'searching': 'SEARCHING',
-    'scanning': 'SEARCHING',
-    'moving': 'APPROACHING',
-    'serving': 'INTERACTING',  // Show customer interaction UI when close
+    'moving': 'SEARCHING', // or APPROACHING, simplifying for now
+    'offering': 'INTERACTING',
+    'returning': 'SERVING', // or IDLE transition
+    'error': 'IDLE'
 };
 
 // Unified Interface: Merges Event Menu (What should be there) with Inventory (What is there)
@@ -24,18 +23,16 @@ interface MenuItem {
     inventory_id: string | null;
     current_quantity: number;
 
-    // Limits
-    max_event_quantity: number;
+    // Limits (from event_drinks)
+    initial_quantity: number;
 }
 
 interface EventOption {
     id: string;
-    event_type: string;
+    name: string;
     description: string;
+    event_type: string;
 }
-
-
-
 
 // Map some icons based on name for visual flair
 const getIcon = (name: string) => {
@@ -47,9 +44,6 @@ const getIcon = (name: string) => {
     if (n.includes('tea')) return '🍵';
     return '🥛';
 };
-
-
-
 
 const AutoPage: React.FC = () => {
     const {
@@ -76,16 +70,17 @@ const AutoPage: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        if (interactionState === 'SELECTING_DRINK') {
+        if (interactionState === 'SELECTING_DRINK' || interactionState === 'IDLE') {
             fetchMenu();
         }
-    }, [interactionState]);
+    }, [interactionState, selectedEventId]);
 
     const fetchEvents = async () => {
         if (!supabase) return;
         const { data } = await supabase
             .from('events')
-            .select('id, event_type, description')
+            .select('id, name, event_type, description')
+            .eq('status', 'active') // Only show active events? Or all? Let's show all for now or scheduled/active
             .order('created_at', { ascending: false });
         if (data) setEvents(data);
     };
@@ -94,7 +89,7 @@ const AutoPage: React.FC = () => {
         if (!supabase) return;
         // Logic: For now, grab the first Robot found in DB to be "Me"
         const { data } = await supabase
-            .from('robot')
+            .from('robots') // Changed from 'robot'
             .select('id, robot_name')
             .limit(1)
             .single();
@@ -108,12 +103,14 @@ const AutoPage: React.FC = () => {
         if (!supabase || !selectedEventId || !currentRobot) return;
 
         // 1. Fetch Event Menu (The "Truth" for this event)
+        // event_drinks links event and drinks
         const { data: eventDrinks, error: edError } = await supabase
             .from('event_drinks')
             .select(`
                 drink_id, 
-                max_quantity,
-                drink_types (id, name)
+                current_quantity,
+                initial_quantity,
+                drinks (id, name)
             `)
             .eq('event_id', selectedEventId);
 
@@ -129,11 +126,10 @@ const AutoPage: React.FC = () => {
 
         const drinkIds = eventDrinks.map(ed => ed.drink_id);
 
-        // 2. Fetch SCOPED Robot Inventory (New Table)
-        // robot_event_inventory filtered by THIS robot and THIS event
+        // 2. Fetch SCOPED Robot Inventory (New Table: robot_drink_stock)
         const { data: inventoryData } = await supabase
-            .from('robot_event_inventory')
-            .select('id, drink_id, current_quantity')
+            .from('robot_drink_stock')
+            .select('id, drink_id, quantity')
             .eq('robot_id', currentRobot.id)
             .eq('event_id', selectedEventId)
             .in('drink_id', drinkIds);
@@ -142,14 +138,14 @@ const AutoPage: React.FC = () => {
         const merged: MenuItem[] = eventDrinks.map(ed => {
             const inv = inventoryData?.find(i => i.drink_id === ed.drink_id);
             // @ts-ignore
-            const drinkName = ed.drink_types?.name || 'Unknown';
+            const drinkName = ed.drinks?.name || 'Unknown';
 
             return {
                 drink_id: ed.drink_id,
                 drink_name: drinkName,
-                max_event_quantity: ed.max_quantity,
+                initial_quantity: ed.initial_quantity, // Global event limit/stock
                 inventory_id: inv ? inv.id : null,
-                current_quantity: inv ? inv.current_quantity : 0
+                current_quantity: inv ? inv.quantity : 0 // Robot's local stock
             };
         });
 
@@ -209,7 +205,8 @@ const AutoPage: React.FC = () => {
     const handleDrinkSelection = async (item: MenuItem) => {
         if (selectedAction === 'ADD') {
             setPendingRefillItem(item);
-            setRefillAmount(item.max_event_quantity - item.current_quantity > 0 ? item.max_event_quantity - item.current_quantity : 1); // Default to fill up
+            // Default fill up to some capacity, say 10 for now as 'max_quantity' on robot isn't strictly defined in UI yet
+            setRefillAmount(5);
             setShowRefillModal(true);
             return;
         }
@@ -227,7 +224,7 @@ const AutoPage: React.FC = () => {
         try {
             if (selectedAction === 'TAKE') {
                 if (!item.inventory_id || item.current_quantity <= 0) {
-                    alert("Out of stock! Please restock first.");
+                    alert("Out of stock on robot! Please restock first.");
                     setInteractionState(isAutonomous ? 'INTERACTING' : 'IDLE'); // Return to correct state
                     return;
                 }
@@ -239,8 +236,8 @@ const AutoPage: React.FC = () => {
                 setSelectedItem({ ...item, current_quantity: newQuantity });
 
                 const { error } = await supabase
-                    .from('robot_event_inventory')
-                    .update({ current_quantity: newQuantity, last_updated: new Date().toISOString() })
+                    .from('robot_drink_stock')
+                    .update({ quantity: newQuantity, last_updated: new Date().toISOString() })
                     .eq('id', item.inventory_id);
 
                 if (error) throw error;
@@ -255,14 +252,14 @@ const AutoPage: React.FC = () => {
 
                 // UPSERT with UNIQUE constraint
                 const { error } = await supabase
-                    .from('robot_event_inventory')
+                    .from('robot_drink_stock')
                     .upsert({
                         id: item.inventory_id || undefined,
                         robot_id: currentRobot.id,
                         event_id: selectedEventId,
                         drink_id: item.drink_id,
-                        current_quantity: newQuantity,
-                        max_quantity: item.max_event_quantity,
+                        quantity: newQuantity,
+                        max_quantity: 20, // Hardcoded max capacity for robot slot for now
                         last_updated: new Date().toISOString()
                     }, { onConflict: 'robot_id, event_id, drink_id' });
 
@@ -272,7 +269,7 @@ const AutoPage: React.FC = () => {
                 }
 
                 if (!item.inventory_id) {
-                    fetchMenu();
+                    fetchMenu(); // Refresh to get the new ID
                 }
             }
 
@@ -341,7 +338,7 @@ const AutoPage: React.FC = () => {
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
                     <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
                         <h3 className="text-xl font-bold mb-2">Restock {pendingRefillItem.drink_name}</h3>
-                        <p className="text-gray-400 text-sm mb-6">Current: {pendingRefillItem.current_quantity} / Max: {pendingRefillItem.max_event_quantity}</p>
+                        <p className="text-gray-400 text-sm mb-6">Current Stock on Robot: {pendingRefillItem.current_quantity}</p>
 
                         <label className="block text-xs font-semibold text-gray-400 mb-2 uppercase">Quantity to Add</label>
                         <input
@@ -403,7 +400,7 @@ const AutoPage: React.FC = () => {
                             <option value="">-- Select Event --</option>
                             {events.map(ev => (
                                 <option key={ev.id} value={ev.id}>
-                                    {ev.event_type} {ev.description ? `(${ev.description})` : ''}
+                                    {ev.name} ({ev.event_type})
                                 </option>
                             ))}
                         </select>
@@ -434,8 +431,6 @@ const AutoPage: React.FC = () => {
                         </div>
                     </div>
 
-
-
                     <button
                         onClick={toggleAuto}
                         disabled={!selectedEventId || !currentRobot}
@@ -462,7 +457,7 @@ const AutoPage: React.FC = () => {
                     </div>
                     {selectedEventId && (
                         <div className="absolute top-4 right-4 bg-blue-500/10 border border-blue-500/30 px-3 py-1 rounded-full text-xs text-blue-400 font-bold">
-                            EVENT MODE: {events.find(e => e.id === selectedEventId)?.event_type.toUpperCase()}
+                            EVENT MODE: {events.find(e => e.id === selectedEventId)?.name.toUpperCase()}
                         </div>
                     )}
 
@@ -473,8 +468,6 @@ const AutoPage: React.FC = () => {
                     )}
 
                     {/* Screens */}
-
-                    {/* Main Screens */}
 
                     {/* IDLE STATE: Manual Control - RESTOCK ONLY */}
                     {interactionState === 'IDLE' && (
@@ -565,14 +558,9 @@ const AutoPage: React.FC = () => {
                                             <div className="text-left">
                                                 <span className="font-semibold text-lg block">{item.drink_name}</span>
                                                 <span className={clsx("text-xs", item.current_quantity > 0 ? "text-green-400" : "text-red-400")}>
-                                                    Stock: {item.current_quantity} / {item.max_event_quantity}
+                                                    Stock: {item.current_quantity}
                                                 </span>
                                             </div>
-                                            {item.max_event_quantity > 0 && (
-                                                <div className="absolute bottom-0 left-0 h-1 bg-gray-700 w-full">
-                                                    <div className="h-full bg-blue-500 transition-all" style={{ width: `${Math.min(100, (item.current_quantity / item.max_event_quantity) * 100)}%` }}></div>
-                                                </div>
-                                            )}
                                         </button>
                                     ))
                                 )}
@@ -599,7 +587,7 @@ const AutoPage: React.FC = () => {
                                     ? `Here is your ${selectedItem?.drink_name}!`
                                     : `${selectedItem?.drink_name} Restocked!`}
                             </h3>
-                            <p className="text-gray-400 mt-2">Current Stock: {selectedItem?.current_quantity} / {selectedItem?.max_event_quantity}</p>
+                            <p className="text-gray-400 mt-2">Current Stock: {selectedItem?.current_quantity}</p>
                             <p className="text-sm text-gray-600 mt-8">Returning to patrol in 3s...</p>
                         </div>
                     )}

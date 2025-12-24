@@ -2,15 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, RefreshCw, ArrowLeft, X } from 'lucide-react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
-import type { DrinkType } from '../types/supabase';
+import type { Drink, EventDrink } from '../types/supabase';
 
-interface EventDrink {
-    id: string;
-    max_quantity: number;
-    drink_id: string;
-    drink_types: {
-        name: string;
-    } | null;
+// Extend the EventDrink type to include the joined Drink data
+interface EventDrinkWithDetails extends EventDrink {
+    drinks: Drink | null;
 }
 
 const DrinksPage: React.FC = () => {
@@ -19,11 +15,12 @@ const DrinksPage: React.FC = () => {
     const eventId = searchParams.get('eventId');
     const eventName = searchParams.get('eventName') || 'Unknown Event';
 
-    const [eventDrinks, setEventDrinks] = useState<EventDrink[]>([]);
-    const [availableDrinks, setAvailableDrinks] = useState<DrinkType[]>([]);
+    const [eventDrinks, setEventDrinks] = useState<EventDrinkWithDetails[]>([]);
+    const [availableDrinks, setAvailableDrinks] = useState<Drink[]>([]);
+    const [drinkListId, setDrinkListId] = useState<string | null>(null);
 
     // UI State
-    const [isInternalLoading, setIsInternalLoading] = useState(false); // Renamed to avoid overlap
+    const [isInternalLoading, setIsInternalLoading] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     // Form State
@@ -34,33 +31,64 @@ const DrinksPage: React.FC = () => {
 
     useEffect(() => {
         if (eventId) {
-            fetchDrinks();
-            fetchAvailableDrinkTypes();
+            fetchEventDetails();
+            fetchEventDrinks();
         }
     }, [eventId]);
 
-    const fetchDrinks = async () => {
+    const fetchEventDetails = async () => {
+        if (!supabase || !eventId) return;
+        const { data, error } = await supabase.from('events').select('drink_list_id').eq('id', eventId).single();
+
+        if (error) {
+            console.error("Error fetching event details:", error);
+            return;
+        }
+
+        if (data && data.drink_list_id) {
+            setDrinkListId(data.drink_list_id);
+            fetchAvailableDrinks(data.drink_list_id);
+        }
+    };
+
+    const fetchEventDrinks = async () => {
         if (!supabase || !eventId) return;
         setIsInternalLoading(true);
+        // Join with the 'drinks' table now
         const { data, error } = await supabase
             .from('event_drinks')
-            .select('*, drink_types(name)')
+            .select('*, drinks(*)')
             .eq('event_id', eventId);
 
-        if (!error && data) {
+        if (error) {
+            console.error("Error fetching event drinks", error);
+        }
+
+        if (data) {
+            // Supabase returns an array for joins if not mapped, but here it's singular FK?
+            // drinks table: event_drinks.drink_id -> drinks.id
             setEventDrinks(data as any);
         }
         setIsInternalLoading(false);
     };
 
-    const fetchAvailableDrinkTypes = async () => {
+    const fetchAvailableDrinks = async (listId: string) => {
         if (!supabase) return;
-        const { data } = await supabase.from('drink_types').select('*').order('name');
+        // Fetch drinks belonging to this event's drink list
+        const { data } = await supabase
+            .from('drinks')
+            .select('*')
+            .eq('drink_list_id', listId)
+            .order('name');
+
         if (data) setAvailableDrinks(data);
     };
 
     const handleAddSubmit = async () => {
-        if (!supabase || !eventId) return;
+        if (!supabase || !eventId || !drinkListId) {
+            alert("Missing event or drink list context.");
+            return;
+        }
 
         try {
             let drinkIdToLink = selectedDrinkId;
@@ -73,13 +101,17 @@ const DrinksPage: React.FC = () => {
                 // Check dupes locally first
                 const existing = availableDrinks.find(d => d.name.toLowerCase() === newDrinkName.toLowerCase());
                 if (existing) {
-                    if (!confirm(`Drink "${existing.name}" already exists. Use it?`)) return;
+                    if (!confirm(`Drink "${existing.name}" already exists in this list. Use it?`)) return;
                     drinkIdToLink = existing.id;
                 } else {
-                    // Create new
+                    // Create new drink in the drink_list
                     const { data: newType, error: createError } = await supabase
-                        .from('drink_types')
-                        .insert([{ name: newDrinkName, description: 'Created via App' }])
+                        .from('drinks')
+                        .insert([{
+                            name: newDrinkName,
+                            drink_list_id: drinkListId,
+                            type: 'general' // valid default
+                        }])
                         .select()
                         .single();
 
@@ -93,19 +125,20 @@ const DrinksPage: React.FC = () => {
                 }
             }
 
-            // Link to Event
+            // Link to Event (Create Inventory Record)
             const { error: linkError } = await supabase
                 .from('event_drinks')
                 .insert([{
                     event_id: eventId,
                     drink_id: drinkIdToLink,
-                    max_quantity: quantity
+                    initial_quantity: quantity,
+                    current_quantity: quantity
                 }]);
 
             if (linkError) {
                 // Handle duplicate link constraint if exists
-                if (linkError.message.includes('duplicate')) {
-                    alert("This drink is already in the event.");
+                if (linkError.message.includes('duplicate') || linkError.message.includes('unique')) {
+                    alert("This drink is already in the event inventory.");
                 } else {
                     throw linkError;
                 }
@@ -115,8 +148,8 @@ const DrinksPage: React.FC = () => {
             setIsModalOpen(false);
             setNewDrinkName('');
             setQuantity(50);
-            fetchDrinks();
-            fetchAvailableDrinkTypes(); // Refresh list if we added one
+            fetchEventDrinks();
+            fetchAvailableDrinks(drinkListId); // Refresh list if we added one
 
         } catch (err: any) {
             alert("Error: " + err.message);
@@ -125,9 +158,9 @@ const DrinksPage: React.FC = () => {
 
     const handleDelete = async (id: string) => {
         if (!supabase) return;
-        if (!confirm("Remove this drink from the event?")) return;
+        if (!confirm("Remove this drink from the event inventory?")) return;
         const { error } = await supabase.from('event_drinks').delete().eq('id', id);
-        if (!error) fetchDrinks();
+        if (!error) fetchEventDrinks();
     };
 
     if (!eventId) {
@@ -154,7 +187,7 @@ const DrinksPage: React.FC = () => {
                     <p className="text-gray-400">Manage drinks available at this event</p>
                 </div>
                 <div className="flex space-x-3">
-                    <button onClick={fetchDrinks} className="flex items-center space-x-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white transition">
+                    <button onClick={fetchEventDrinks} className="flex items-center space-x-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white transition">
                         <RefreshCw size={18} />
                         <span>Sync</span>
                     </button>
@@ -173,24 +206,29 @@ const DrinksPage: React.FC = () => {
                     <thead className="bg-gray-800 text-gray-400">
                         <tr>
                             <th className="p-4 font-medium">Drink Name</th>
-                            <th className="p-4 font-medium text-center">Max Qty</th>
+                            <th className="p-4 font-medium text-center">Initial Qty</th>
+                            <th className="p-4 font-medium text-center">Current Qty</th>
                             <th className="p-4 font-medium text-right">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-700">
                         {eventDrinks.length === 0 ? (
                             <tr>
-                                <td colSpan={3} className="p-8 text-center text-gray-500">No drinks assigned to this event. Add some!</td>
+                                <td colSpan={4} className="p-8 text-center text-gray-500">No drinks assigned to this event. Add some!</td>
                             </tr>
                         ) : (
                             eventDrinks.map((ed) => (
                                 <tr key={ed.id} className="hover:bg-gray-700/30 transition">
                                     <td className="p-4 font-medium">
-                                        {ed.drink_types?.name || 'Unknown Drink'}
+                                        {/* @ts-ignore */}
+                                        {ed.drinks?.name || 'Unknown Drink'}
+                                    </td>
+                                    <td className="p-4 text-center text-gray-400">
+                                        {ed.initial_quantity}
                                     </td>
                                     <td className="p-4 text-center">
-                                        <span className="bg-blue-500/20 text-blue-400 px-2 py-1 rounded text-xs font-bold">
-                                            {ed.max_quantity}
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${ed.current_quantity > 0 ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'}`}>
+                                            {ed.current_quantity}
                                         </span>
                                     </td>
                                     <td className="p-4 text-right">
@@ -210,7 +248,7 @@ const DrinksPage: React.FC = () => {
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="bg-gray-800 border border-gray-700 rounded-xl w-full max-w-md shadow-2xl animate-in zoom-in duration-200">
                         <div className="flex justify-between items-center p-6 border-b border-gray-700">
-                            <h3 className="text-xl font-bold">Add Drink to Menu</h3>
+                            <h3 className="text-xl font-bold">Add Drink to Inventory</h3>
                             <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white">
                                 <X size={24} />
                             </button>
@@ -223,7 +261,7 @@ const DrinksPage: React.FC = () => {
                                     onClick={() => setMode('EXISTING')}
                                     className={`flex-1 py-2 rounded-md font-medium text-sm transition ${mode === 'EXISTING' ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-white'}`}
                                 >
-                                    Select Existing
+                                    Select from List
                                 </button>
                                 <button
                                     onClick={() => setMode('NEW')}
@@ -246,10 +284,13 @@ const DrinksPage: React.FC = () => {
                                             <option key={d.id} value={d.id}>{d.name}</option>
                                         ))}
                                     </select>
+                                    {availableDrinks.length === 0 && (
+                                        <p className="text-xs text-yellow-500 mt-2">No drinks in this menu yet.</p>
+                                    )}
                                 </div>
                             ) : (
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-400 mb-2">Drink Name</label>
+                                    <label className="block text-sm font-medium text-gray-400 mb-2">New Drink Name</label>
                                     <input
                                         type="text"
                                         value={newDrinkName}
@@ -257,11 +298,12 @@ const DrinksPage: React.FC = () => {
                                         placeholder="e.g. Orange Juice"
                                         className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500"
                                     />
+                                    <p className="text-xs text-gray-500 mt-1">Will be added to the current Drink List.</p>
                                 </div>
                             )}
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-400 mb-2">Max Quantity</label>
+                                <label className="block text-sm font-medium text-gray-400 mb-2">Initial Quantity</label>
                                 <input
                                     type="number"
                                     value={quantity}
@@ -277,7 +319,7 @@ const DrinksPage: React.FC = () => {
                                 onClick={handleAddSubmit}
                                 className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-lg shadow-blue-900/40"
                             >
-                                Add to Event
+                                Add to Inventory
                             </button>
                         </div>
                     </div>

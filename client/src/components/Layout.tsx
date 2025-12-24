@@ -12,11 +12,10 @@ import { socket } from '../socket';
 // Map robot status to UI interaction state
 const statusToState: Record<string, 'IDLE' | 'SEARCHING' | 'APPROACHING' | 'INTERACTING' | 'SERVING'> = {
     'idle': 'IDLE',
-    'starting': 'SEARCHING',
-    'searching': 'SEARCHING',
-    'scanning': 'SEARCHING',
-    'moving': 'APPROACHING',
-    'serving': 'INTERACTING',
+    'moving': 'SEARCHING', // or APPROACHING
+    'offering': 'INTERACTING',
+    'returning': 'SERVING',
+    'error': 'IDLE' // Or specific error state if UI supported it
 };
 
 const Layout: React.FC = () => {
