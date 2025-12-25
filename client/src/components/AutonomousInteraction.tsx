@@ -55,7 +55,7 @@ export default function AutonomousInteraction() {
                         <Bot className="h-8 w-8 text-white" />
                     </div>
                     <h2 className="text-2xl font-bold text-white">Robot Arrived</h2>
-                    <p className="text-blue-100">Tipsy is waiting for your input</p>
+                    <p className="text-blue-100">WaterWaiter is waiting for your input</p>
                 </div>
 
                 {/* Content */}

@@ -9,6 +9,10 @@ import ManualPage from './pages/ManualPage';
 import AutoPage from './pages/AutoPage';
 import EventsPage from './pages/EventsPage';
 import DrinksPage from './pages/DrinksPage';
+import InventoryPage from './pages/InventoryPage';
+import ActivityLogPage from './pages/ActivityLogPage';
+import AnalyticsPage from './pages/AnalyticsPage';
+
 import LoginPage from './pages/LoginPage';
 
 function App() {
@@ -33,6 +37,10 @@ function App() {
         <Route path="monitoring" element={<MonitorPage />} />
         <Route path="events" element={<EventsPage />} />
         <Route path="drinks" element={<DrinksPage />} />
+        <Route path="inventory" element={<InventoryPage />} />
+        <Route path="activity" element={<ActivityLogPage />} />
+        <Route path="analytics" element={<AnalyticsPage />} />
+
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

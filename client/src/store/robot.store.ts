@@ -16,6 +16,7 @@ interface RobotState {
     uptime: number; // seconds
     latency: number; // ms
     latencyHistory: number[];
+    selectedRobotId: string | null; // UI-level: which robot context admin is viewing
 
     setConnected: (connected: boolean) => void;
     updateStatus: (temp: number) => void;
@@ -28,6 +29,7 @@ interface RobotState {
     updateStatusFull: (data: Partial<RobotState>) => void;
     incrementUptime: () => void;
     addLatencySample: (ms: number) => void;
+    setSelectedRobotId: (id: string | null) => void;
 }
 
 export const useRobotStore = create<RobotState>()(
@@ -45,6 +47,7 @@ export const useRobotStore = create<RobotState>()(
             uptime: 0,
             latency: 0,
             latencyHistory: [],
+            selectedRobotId: null,
 
             setConnected: (connected) => set({ isConnected: connected }),
             updateStatus: (temp) => set({ cpuTemp: temp }),
@@ -60,12 +63,14 @@ export const useRobotStore = create<RobotState>()(
                 const newHistory = [...state.latencyHistory, ms].slice(-20); // Keep last 20 samples
                 return { latencyHistory: newHistory, latency: ms };
             }),
+            setSelectedRobotId: (id) => set({ selectedRobotId: id }),
         }),
         {
             name: 'robot-storage',
             partialize: (state) => ({
                 activeEventId: state.activeEventId,
-                activeRobot: state.activeRobot
+                activeRobot: state.activeRobot,
+                selectedRobotId: state.selectedRobotId
             }),
         }
     )

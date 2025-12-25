@@ -4,17 +4,7 @@ import clsx from 'clsx';
 import { useRobotStore } from '../store/robot.store';
 import { supabase } from '../services/supabase';
 
-// Map robot status to UI interaction state
-// New Schema Statuses: 'idle', 'moving', 'offering', 'returning', 'error'
-const statusToState: Record<string, 'IDLE' | 'SEARCHING' | 'APPROACHING' | 'INTERACTING' | 'SERVING'> = {
-    'idle': 'IDLE',
-    'moving': 'SEARCHING', // or APPROACHING, simplifying for now
-    'offering': 'INTERACTING',
-    'returning': 'SERVING', // or IDLE transition
-    'error': 'IDLE'
-};
-
-// Unified Interface: Merges Event Menu (What should be there) with Inventory (What is there)
+// Unified Interface
 interface MenuItem {
     drink_id: string;
     drink_name: string;
@@ -50,7 +40,8 @@ const AutoPage: React.FC = () => {
         isAutonomous, setAutonomous,
         activeEventId: selectedEventId, setActiveEventId: setSelectedEventId,
         activeRobot: currentRobot, setActiveRobot: setCurrentRobot,
-        interactionState, setInteractionState
+        interactionState, setInteractionState,
+        selectedRobotId // Get selected robot from header dropdown
     } = useRobotStore();
 
     // Context Selection
@@ -67,7 +58,7 @@ const AutoPage: React.FC = () => {
     useEffect(() => {
         fetchEvents();
         fetchRobots();
-    }, []);
+    }, [selectedRobotId]); // Re-fetch when selected robot changes
 
     useEffect(() => {
         if (interactionState === 'SELECTING_DRINK' || interactionState === 'IDLE') {
@@ -75,15 +66,64 @@ const AutoPage: React.FC = () => {
         }
     }, [interactionState, selectedEventId]);
 
+
     const fetchEvents = async () => {
         if (!supabase) return;
-        const { data } = await supabase
-            .from('events')
-            .select('id, name, event_type, description')
-            .eq('status', 'active') // Only show active events? Or all? Let's show all for now or scheduled/active
-            .order('created_at', { ascending: false });
-        if (data) setEvents(data);
+
+        console.log('🔍 AutoPage: selectedRobotId =', selectedRobotId);
+
+        // If a robot is selected in header, only show events assigned to that robot
+        if (selectedRobotId) {
+            const { data: eventRobots } = await supabase
+                .from('event_robot')
+                .select('event_id')
+                .eq('robot_id', selectedRobotId);
+
+            console.log('📋 Event-Robot assignments:', eventRobots);
+
+            if (!eventRobots || eventRobots.length === 0) {
+                console.warn('⚠️ No events assigned to this robot. Showing all active events as fallback.');
+                // Fallback: Show all events if robot has no assignments
+                const { data } = await supabase
+                    .from('events')
+                    .select('id, name, event_type, description')
+                    .eq('status', 'active')
+                    .order('created_at', { ascending: false });
+
+                if (data) setEvents(data);
+                return;
+            }
+
+            const eventIds = eventRobots.map(er => er.event_id);
+            console.log('🎯 Event IDs for this robot:', eventIds);
+
+            const { data, error } = await supabase
+                .from('events')
+                .select('id, name, event_type, description')
+                .in('id', eventIds)
+                .in('status', ['scheduled', 'active']) // Show both scheduled and active
+                .order('created_at', { ascending: false });
+
+            console.log('✅ Final events query result:', data, 'Error:', error);
+            if (data) {
+                console.log('📊 Setting', data.length, 'events to state');
+                setEvents(data);
+            } else {
+                console.error('❌ No data returned from events query');
+            }
+        } else {
+            console.log('ℹ️ No robot selected, fetching all active events');
+
+            const { data } = await supabase
+                .from('events')
+                .select('id, name, event_type, description')
+                .eq('status', 'active')
+                .order('created_at', { ascending: false });
+
+            if (data) setEvents(data);
+        }
     };
+
 
     const fetchRobots = async () => {
         if (!supabase) return;
@@ -237,7 +277,7 @@ const AutoPage: React.FC = () => {
 
                 const { error } = await supabase
                     .from('robot_drink_stock')
-                    .update({ quantity: newQuantity, last_updated: new Date().toISOString() })
+                    .update({ quantity: newQuantity, updated_at: new Date().toISOString() })
                     .eq('id', item.inventory_id);
 
                 if (error) throw error;
@@ -260,7 +300,7 @@ const AutoPage: React.FC = () => {
                         drink_id: item.drink_id,
                         quantity: newQuantity,
                         max_quantity: 20, // Hardcoded max capacity for robot slot for now
-                        last_updated: new Date().toISOString()
+                        updated_at: new Date().toISOString()
                     }, { onConflict: 'robot_id, event_id, drink_id' });
 
                 if (error) {

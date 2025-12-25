@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { Activity, Bot, Gamepad2, LayoutDashboard, Coffee, AlertCircle, LogOut, Calendar } from 'lucide-react';
+import { Activity, Bot, Gamepad2, LayoutDashboard, Coffee, AlertCircle, LogOut, Calendar, ChevronDown, Package, History, BarChart3 } from 'lucide-react';
 import { useRobotStore } from '../store/robot.store';
 import clsx from 'clsx';
 
@@ -26,10 +26,13 @@ const Layout: React.FC = () => {
         setInteractionState,
         updateStatusFull,
         incrementUptime,
-        addLatencySample
+        addLatencySample,
+        selectedRobotId,
+        setSelectedRobotId
     } = useRobotStore();
 
     const [session, setSession] = React.useState<Session | null>(null);
+    const [robots, setRobots] = React.useState<{ id: string; robot_name: string; status: string | null }[]>([]);
 
     React.useEffect(() => {
         // Initial Fetch to sync state
@@ -45,6 +48,25 @@ const Layout: React.FC = () => {
             }
         };
         fetchRunning();
+
+        // Fetch robots for selector
+        const fetchRobots = async () => {
+            if (!supabase) return;
+            const { data, error } = await supabase
+                .from('robots')
+                .select('id, robot_name, status')
+                .order('robot_name');
+            if (error) {
+                console.error('Error fetching robots:', error);
+            } else if (data && data.length > 0) {
+                setRobots(data);
+                // Initialize selected robot if not set
+                if (!selectedRobotId) {
+                    setSelectedRobotId(data[0].id);
+                }
+            }
+        };
+        fetchRobots();
 
         // Socket Listeners
         // Socket Listeners
@@ -153,6 +175,9 @@ const Layout: React.FC = () => {
         { to: '/monitoring', label: 'Monitoring', icon: LayoutDashboard },
         { to: '/events', label: 'Events', icon: Calendar },
         { to: '/drinks', label: 'Drinks', icon: Coffee },
+        { to: '/inventory', label: 'Inventory', icon: Package },
+        { to: '/activity', label: 'Activity', icon: History },
+        { to: '/analytics', label: 'Analytics', icon: BarChart3 },
     ];
 
     return (
@@ -225,7 +250,28 @@ const Layout: React.FC = () => {
             {/* Main Content */}
             <main className="flex-1 flex flex-col overflow-hidden">
                 <header className="h-16 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6">
-                    <h2 className="text-lg font-semibold">Dashboard</h2>
+                    <div className="flex items-center space-x-4">
+                        <h2 className="text-lg font-semibold">Dashboard</h2>
+
+                        {/* Robot Selector */}
+                        {robots.length > 0 && (
+                            <div className="relative">
+                                <select
+                                    value={selectedRobotId || ''}
+                                    onChange={(e) => setSelectedRobotId(e.target.value)}
+                                    className="appearance-none bg-purple-900/30 border border-purple-500/50 rounded-lg px-4 py-2 pr-10 text-sm text-white hover:bg-purple-900/50 focus:outline-none focus:border-purple-400 transition cursor-pointer"
+                                    title="Select robot context"
+                                >
+                                    {robots.map(robot => (
+                                        <option key={robot.id} value={robot.id} className="bg-gray-900">
+                                            🤖 {robot.robot_name} {robot.status ? `(${robot.status})` : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-400 pointer-events-none" />
+                            </div>
+                        )}
+                    </div>
 
                     <button
                         onClick={handleEmergencyStop}

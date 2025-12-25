@@ -18,8 +18,12 @@ let manualProcess: ChildProcess | null = null; // Python script for manual contr
 export const startRobot = async (req: Request, res: Response): Promise<void> => {
     try {
         // Stop manual process if running to avoid conflict
-        if (manualProcess) {
+        if (manualProcess && !manualProcess.killed && manualProcess.exitCode === null) {
+            logger.info('Stopping manual process before starting autonomous...');
             manualProcess.kill();
+            manualProcess = null;
+        } else {
+            // Clear stale reference
             manualProcess = null;
         }
 
@@ -38,8 +42,8 @@ export const startRobot = async (req: Request, res: Response): Promise<void> => 
         logger.info(`Starting robot script: ${robotScriptPath}`);
         logger.info(`Robot working directory: ${robotDir}`);
 
-        // Use the venv Python which has aiohttp installed
-        const pythonPath = path.join(process.cwd(), '..', '..', '.venv', 'Scripts', 'python.exe');
+        // Use the venv Python (one level up from server dir, not two)
+        const pythonPath = path.join(process.cwd(), '..', '.venv', 'Scripts', 'python.exe');
         logger.info(`Using Python: ${pythonPath}`);
 
         robotProcess = spawn(pythonPath, [robotScriptPath], {
@@ -99,19 +103,26 @@ export const stopRobot = async (req: Request, res: Response): Promise<void> => {
     try {
         let stoppedSomething = false;
 
-        if (robotProcess) {
+        if (robotProcess && !robotProcess.killed) {
+            logger.info('Stopping autonomous robot process...');
             robotProcess.kill('SIGTERM');
             robotProcess = null;
             stoppedSomething = true;
         }
 
-        if (manualProcess) {
-            manualProcess.kill('SIGTERM'); // kill the manual driver
+        if (manualProcess && !manualProcess.killed) {
+            logger.info('Stopping manual drive process...');
+            manualProcess.kill('SIGTERM');
             manualProcess = null;
             stoppedSomething = true;
         }
 
+        // Force cleanup even if no processes found
         if (!stoppedSomething) {
+            logger.warn('No active processes found, forcing cleanup...');
+            robotProcess = null;
+            manualProcess = null;
+
             // Zombie cleanup: Force kill and restart camera specifically
             if (process.platform === 'win32') {
                 spawn('taskkill', ['/F', '/IM', 'python.exe']);
@@ -127,7 +138,7 @@ export const stopRobot = async (req: Request, res: Response): Promise<void> => {
         currentStatus = 'idle';
         socketService.emit('robot_status', { status: 'idle' });
 
-        logger.info('Robot stopped');
+        logger.info('Robot stopped successfully');
         res.json({ success: true, message: 'Robot stopped' });
     } catch (error) {
         logger.error('Error stopping robot:', error);
@@ -237,7 +248,7 @@ export const manualControl = async (req: Request, res: Response): Promise<void> 
         if (!manualProcess || manualProcess.killed) {
             const manualScriptPath = path.join(process.cwd(), '..', 'robot', 'manual_drive.py');
             const robotDir = path.join(process.cwd(), '..', 'robot');
-            const pythonPath = path.join(process.cwd(), '..', '..', '.venv', 'Scripts', 'python.exe');
+            const pythonPath = path.join(process.cwd(), '..', '.venv', 'Scripts', 'python.exe');
 
             logger.info(`Spawning manual drive: ${manualScriptPath}`);
             manualProcess = spawn(pythonPath, [manualScriptPath], {

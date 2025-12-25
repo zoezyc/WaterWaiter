@@ -18,9 +18,10 @@ export interface Drink {
     drink_list_id: string; // FK to drink_list
     name: string;
     type: string | null;
-    volume: number | null;
+    volume: string | null; // Changed from number to string
     default_quantity: number;
     unit: string | null; // e.g., 'ml', 'oz'
+    description: string | null;
     created_at: string;
 }
 
@@ -35,14 +36,17 @@ export interface Event {
     location: string | null;
     drink_list_id: string; // FK to drink_list
     status: 'scheduled' | 'active' | 'completed' | 'cancelled';
+    event_size: number | null;
+    min_age: number | null;
+    max_age: number | null;
     created_at: string;
 }
 
 export interface Robot {
     id: string; // UUID
     robot_name: string;
-    serial_number: string | null;
     status: 'idle' | 'moving' | 'offering' | 'returning' | 'error' | null;
+    total_system_uptime: number | null;
     created_at: string;
 }
 
@@ -51,6 +55,7 @@ export interface EventRobot {
     event_id: string; // FK to events
     robot_id: string; // FK to robots
     assigned_at: string;
+    robot_capacity?: number;
 }
 
 export interface EventDrink {
@@ -68,8 +73,9 @@ export interface RobotDrinkStock {
     robot_id: string; // FK to robots
     event_id: string; // FK to events
     drink_id: string; // FK to drinks
-    quantity: number;
+    current_quantity: number; // Actual column name in SQL
     max_quantity: number;
+    initial_quantity: number; // Actual column name in SQL
     last_updated: string;
     updated_at: string;
 }
@@ -83,6 +89,7 @@ export interface ActivityLog {
     action: 'take' | 'refill';
     quantity_changed: number;
     timestamp: string;
+    note: string | null;
 }
 
 export interface Notification {
