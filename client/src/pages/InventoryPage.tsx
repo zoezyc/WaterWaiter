@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Package, RefreshCw, AlertTriangle, Pencil, Check, X } from 'lucide-react';
 import { supabase } from '../services/supabase';
-import { useRobotStore } from '../store/robot.store';
 
 interface RobotStock {
     id: string;
@@ -17,7 +16,8 @@ interface RobotStock {
 }
 
 const InventoryPage: React.FC = () => {
-    const { selectedRobotId } = useRobotStore();
+    const [robots, setRobots] = useState<any[]>([]);
+    const [selectedRobotId, setSelectedRobotId] = useState<string>(''); // Local state, empty = show all
     const [inventory, setInventory] = useState<RobotStock[]>([]);
     const [loading, setLoading] = useState(true);
     const [editingStockId, setEditingStockId] = useState<string | null>(null);
@@ -26,6 +26,17 @@ const InventoryPage: React.FC = () => {
 
     // Track event_robot entries with their capacities (from database)
     const [eventRobotData, setEventRobotData] = useState<Record<string, { id: string, capacity: number }>>({});
+
+    // Fetch all robots for the dropdown
+    const fetchRobots = async () => {
+        if (!supabase) return;
+        const { data, error } = await supabase.from('robots').select('*').order('robot_name');
+        if (error) {
+            console.error('Error fetching robots:', error);
+        } else if (data) {
+            setRobots(data);
+        }
+    };
 
     // Update capacity in database
     const updateCapacity = async (eventRobotId: string, newCapacity: number) => {
@@ -50,6 +61,10 @@ const InventoryPage: React.FC = () => {
             console.log(`✅ Capacity updated to ${newCapacity}`);
         }
     };
+
+    useEffect(() => {
+        fetchRobots();
+    }, []);
 
     useEffect(() => {
         fetchInventory();
@@ -355,7 +370,23 @@ const InventoryPage: React.FC = () => {
                     </h2>
                     <p className="text-gray-400 mt-1">Manage physical stock levels for each robot</p>
                 </div>
-                <div className="flex space-x-2">
+                <div className="flex items-center space-x-3">
+                    {/* Robot Selector */}
+                    <div className="flex items-center space-x-2">
+                        <label className="text-sm text-gray-400">Filter by Robot:</label>
+                        <select
+                            className="px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:border-purple-500 outline-none"
+                            value={selectedRobotId}
+                            onChange={(e) => setSelectedRobotId(e.target.value)}
+                        >
+                            <option value="">All Robots</option>
+                            {robots.map(robot => (
+                                <option key={robot.id} value={robot.id}>
+                                    {robot.robot_name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                     <button onClick={syncWithEventDrinks} className="flex items-center space-x-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition">
                         <RefreshCw size={18} />
                         <span>Sync with Events</span>

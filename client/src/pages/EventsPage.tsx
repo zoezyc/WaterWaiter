@@ -16,7 +16,7 @@ const EventsPage: React.FC = () => {
     const [isEditing, setIsEditing] = useState(false);
     const [editingEventId, setEditingEventId] = useState<string | null>(null);
     const [newEvent, setNewEvent] = useState({
-        robot_id: '', // Single robot assignment (simplify primary robot)
+        robot_ids: [] as string[], // CHANGED: Multiple robots per event
         name: '',
         event_type: '',
         description: '',
@@ -30,6 +30,7 @@ const EventsPage: React.FC = () => {
         min_age: '',
         max_age: ''
     });
+    const [conflictedRobots, setConflictedRobots] = useState<string[]>([]); // Robot IDs with date conflicts
 
     useEffect(() => {
         fetchEvents();
@@ -75,6 +76,59 @@ const EventsPage: React.FC = () => {
         if (data) setRobots(data);
     };
 
+    // Check which robots have conflicts on the selected date
+    const checkRobotConflicts = async (eventDate: string, excludeEventId?: string) => {
+        if (!supabase || !eventDate) {
+            setConflictedRobots([]);
+            return;
+        }
+
+        try {
+            // Find all events on the same date
+            const { data: eventsOnDate, error } = await supabase
+                .from('events')
+                .select('id, event_date')
+                .eq('event_date', eventDate)
+                .neq('id', excludeEventId || ''); // Exclude current event if editing
+
+            if (error) {
+                console.error('Error checking conflicts:', error);
+                return;
+            }
+
+            if (!eventsOnDate || eventsOnDate.length === 0) {
+                setConflictedRobots([]);
+                return;
+            }
+
+            // Get robots assigned to these events
+            const eventIds = eventsOnDate.map(e => e.id);
+            const { data: assignedRobots, error: robotError } = await supabase
+                .from('event_robot')
+                .select('robot_id')
+                .in('event_id', eventIds);
+
+            if (robotError) {
+                console.error('Error fetching assigned robots:', robotError);
+                return;
+            }
+
+            // Extract unique robot IDs that are conflicted
+            const conflicted = [...new Set(assignedRobots?.map(r => r.robot_id) || [])];
+            setConflictedRobots(conflicted);
+            console.log(`🔍 Found ${conflicted.length} robots with conflicts on ${eventDate}:`, conflicted);
+        } catch (err) {
+            console.error('Conflict check failed:', err);
+        }
+    };
+
+    // Check conflicts when date changes
+    useEffect(() => {
+        if (newEvent.event_date) {
+            checkRobotConflicts(newEvent.event_date, editingEventId || undefined);
+        }
+    }, [newEvent.event_date, editingEventId]);
+
     const createDefaultDrinkList = async () => {
         if (!supabase) return null;
         const name = prompt("Enter a name for the new Drink List (e.g., 'Standard Menu')");
@@ -92,9 +146,9 @@ const EventsPage: React.FC = () => {
     const handleCreate = async () => {
         if (!supabase) return;
 
-        // Validation: Robot selection first
-        if (!newEvent.robot_id) {
-            alert('Please select a robot first');
+        // Validation: At least one robot must be selected
+        if (!newEvent.robot_ids || newEvent.robot_ids.length === 0) {
+            alert('Please select at least one robot');
             return;
         }
 
@@ -176,65 +230,68 @@ const EventsPage: React.FC = () => {
             } else {
                 console.log(`✅ Auto-populated ${drinksInList.length} drinks to event inventory`);
 
-                // Also populate robot_drink_stock for the assigned robot
-                const robotStockEntries = drinksInList.map(drink => ({
-                    robot_id: newEvent.robot_id,
-                    event_id: eventData.id,
-                    drink_id: drink.id,
-                    current_quantity: 0,
-                    initial_quantity: 0,
-                    max_quantity: 20 // Default max per drink
-                }));
+                // LOOP through ALL selected robots and create stock for each
+                for (const robotId of newEvent.robot_ids) {
+                    const robotStockEntries = drinksInList.map(drink => ({
+                        robot_id: robotId,
+                        event_id: eventData.id,
+                        drink_id: drink.id,
+                        current_quantity: 0,
+                        initial_quantity: 0,
+                        max_quantity: 20 // Default max per drink
+                    }));
 
-                const { data: createdStock, error: stockError } = await supabase
-                    .from('robot_drink_stock')
-                    .insert(robotStockEntries)
-                    .select();
+                    const { data: createdStock, error: stockError } = await supabase
+                        .from('robot_drink_stock')
+                        .insert(robotStockEntries)
+                        .select();
 
-                if (stockError) {
-                    console.error('Error creating robot stock:', stockError);
-                } else {
-                    console.log(`✅ Auto-populated ${drinksInList.length} drinks to robot stock`);
+                    if (stockError) {
+                        console.error(`Error creating robot stock for ${robotId}:`, stockError);
+                    } else {
+                        console.log(`✅ Auto-populated ${drinksInList.length} drinks to robot ${robotId} stock`);
 
-                    // Log the initial creation of stock entries
-                    if (createdStock && createdStock.length > 0) {
-                        const activityLogs = createdStock.map(stock => ({
-                            robot_id: stock.robot_id,
-                            event_id: stock.event_id,
-                            drink_id: stock.drink_id,
-                            action: 'refill',
-                            quantity_changed: 0,
-                            note: `Initial robot stock created for event`
-                        }));
+                        // Log the initial creation of stock entries
+                        if (createdStock && createdStock.length > 0) {
+                            const activityLogs = createdStock.map(stock => ({
+                                robot_id: stock.robot_id,
+                                event_id: stock.event_id,
+                                drink_id: stock.drink_id,
+                                action: 'refill',
+                                quantity_changed: 0,
+                                note: `Initial robot stock created for event`
+                            }));
 
-                        const { error: logError } = await supabase.from('activity_log').insert(activityLogs);
+                            const { error: logError } = await supabase.from('activity_log').insert(activityLogs);
 
-                        if (logError) {
-                            console.error('❌ Failed to log robot stock creation:', logError);
-                        } else {
-                            console.log(`✅ Logged ${activityLogs.length} stock creation activities`);
+                            if (logError) {
+                                console.error('❌ Failed to log robot stock creation:', logError);
+                            } else {
+                                console.log(`✅ Logged ${activityLogs.length} stock creation activities for robot ${robotId}`);
+                            }
                         }
+                    }
+
+                    // Link robot to event via event_robot table
+                    const { error: linkError } = await supabase.from('event_robot').insert([{
+                        event_id: eventData.id,
+                        robot_id: robotId,
+                        robot_capacity: 50  // Default capacity
+                    }]);
+
+                    if (linkError) {
+                        console.error(`Error linking robot ${robotId} to event:`, linkError);
+                    } else {
+                        console.log(`✅ Linked robot ${robotId} to event`);
                     }
                 }
             }
         }
 
-        // Link robot to event via event_robot table
-        const { error: linkError } = await supabase.from('event_robot').insert([{
-            event_id: eventData.id,
-            robot_id: newEvent.robot_id,
-            robot_capacity: 50  // Default capacity
-        }]);
-
-        if (linkError) {
-            console.error('Error linking robot to event:', linkError);
-            alert('Event created but failed to assign robot. You can assign it later.');
-        }
-
         fetchEvents();
         setIsCreating(false);
         setNewEvent({
-            robot_id: '',
+            robot_ids: [],
             name: '',
             event_type: '',
             description: '',
@@ -328,7 +385,7 @@ const EventsPage: React.FC = () => {
         setEditingEventId(event.id);
         setIsEditing(true);
         setNewEvent({
-            robot_id: '', // Will be fetched from event_robot
+            robot_ids: [], // Will be fetched from event_robot
             name: event.name,
             event_type: event.event_type || '',
             description: event.description || '',
@@ -343,15 +400,16 @@ const EventsPage: React.FC = () => {
             max_age: event.max_age?.toString() || ''
         });
 
-        // Fetch robot_id from event_robot table
+        // Fetch ALL robot_ids from event_robot table
         supabase
             .from('event_robot')
             .select('robot_id')
             .eq('event_id', event.id)
-            .single()
             .then(({ data }) => {
-                if (data) {
-                    setNewEvent(prev => ({ ...prev, robot_id: data.robot_id }));
+                if (data && data.length > 0) {
+                    const robotIds = data.map(r => r.robot_id);
+                    setNewEvent(prev => ({ ...prev, robot_ids: robotIds }));
+                    console.log(`📝 Editing event with ${robotIds.length} robots:`, robotIds);
                 }
             });
     };
@@ -360,6 +418,11 @@ const EventsPage: React.FC = () => {
         if (!supabase || !editingEventId) return;
         if (!newEvent.name || !newEvent.event_date) {
             alert('Event Name and Date are required');
+            return;
+        }
+
+        if (!newEvent.robot_ids || newEvent.robot_ids.length === 0) {
+            alert('Please select at least one robot');
             return;
         }
 
@@ -388,20 +451,44 @@ const EventsPage: React.FC = () => {
                 return;
             }
 
-            // Update robot assignment if changed
-            if (newEvent.robot_id) {
-                await supabase.from('event_robot').delete().eq('event_id', editingEventId);
+            // Delete old robot assignments and stock
+            await supabase.from('event_robot').delete().eq('event_id', editingEventId);
+            await supabase.from('robot_drink_stock').delete().eq('event_id', editingEventId);
+
+            // Create new robot assignments
+            for (const robotId of newEvent.robot_ids) {
                 await supabase.from('event_robot').insert([{
                     event_id: editingEventId,
-                    robot_id: newEvent.robot_id
+                    robot_id: robotId,
+                    robot_capacity: 50
                 }]);
+
+                // Get drinks for this event and create stock entries
+                const { data: eventDrinks } = await supabase
+                    .from('event_drinks')
+                    .select('drink_id')
+                    .eq('event_id', editingEventId);
+
+                if (eventDrinks && eventDrinks.length > 0) {
+                    const stockEntries = eventDrinks.map(ed => ({
+                        robot_id: robotId,
+                        event_id: editingEventId,
+                        drink_id: ed.drink_id,
+                        current_quantity: 0,
+                        initial_quantity: 0,
+                        max_quantity: 20
+                    }));
+
+                    await supabase.from('robot_drink_stock').insert(stockEntries);
+                    console.log(`✅ Created stock entries for robot ${robotId}`);
+                }
             }
 
             fetchEvents();
             setIsEditing(false);
             setEditingEventId(null);
             setNewEvent({
-                robot_id: '',
+                robot_ids: [],
                 name: '',
                 event_type: '',
                 description: '',
@@ -444,8 +531,8 @@ const EventsPage: React.FC = () => {
 
                     {/* Step indicator */}
                     <div className="mb-6 flex items-center justify-center space-x-2 text-sm">
-                        <div className={`px-3 py-1 rounded ${newEvent.robot_id ? 'bg-green-600' : 'bg-gray-700'}`}>
-                            1. Select Robot
+                        <div className={`px-3 py-1 rounded ${newEvent.robot_ids.length > 0 ? 'bg-green-600' : 'bg-gray-700'}`}>
+                            1. Select Robot(s)
                         </div>
                         <div className="text-gray-500">→</div>
                         <div className={`px-3 py-1 rounded ${newEvent.name ? 'bg-green-600' : 'bg-gray-700'}`}>
@@ -460,22 +547,43 @@ const EventsPage: React.FC = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         {/* STEP 1: Robot Selection - FIRST */}
                         <div className="md:col-span-2 p-4 bg-blue-900/20 border border-blue-500/30 rounded-lg">
-                            <label className="block text-sm font-semibold text-blue-400 mb-2">
+                            <label className="block text-sm font-semibold text-blue-400 mb-3">
                                 <Bot className="inline mr-2" size={16} />
-                                Step 1: Select Robot (Required)
+                                Step 1: Select Robot(s) - Required
                             </label>
-                            <select
-                                className="w-full bg-gray-900 border border-gray-700 rounded p-3 text-white focus:border-blue-500 outline-none"
-                                value={newEvent.robot_id}
-                                onChange={e => setNewEvent({ ...newEvent, robot_id: e.target.value })}
-                            >
-                                <option value="">-- Choose a Robot --</option>
-                                {robots.map(robot => (
-                                    <option key={robot.id} value={robot.id}>
-                                        {robot.robot_name} {robot.status ? `(${robot.status})` : ''}
-                                    </option>
-                                ))}
-                            </select>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                {robots.map(robot => {
+                                    const isConflicted = conflictedRobots.includes(robot.id);
+                                    const isSelected = newEvent.robot_ids.includes(robot.id);
+                                    return (
+                                        <label
+                                            key={robot.id}
+                                            className={`flex items-center p-3 border rounded-lg cursor-pointer transition ${isConflicted ? 'bg-red-900/20 border-red-500/50 opacity-50 cursor-not-allowed' :
+                                                isSelected ? 'bg-blue-900/40 border-blue-500' :
+                                                    'bg-gray-900 border-gray-700 hover:border-blue-500/50'
+                                                }`}
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                disabled={isConflicted}
+                                                onChange={e => {
+                                                    if (e.target.checked) {
+                                                        setNewEvent({ ...newEvent, robot_ids: [...newEvent.robot_ids, robot.id] });
+                                                    } else {
+                                                        setNewEvent({ ...newEvent, robot_ids: newEvent.robot_ids.filter(id => id !== robot.id) });
+                                                    }
+                                                }}
+                                                className="mr-2"
+                                            />
+                                            <span className="text-sm">
+                                                {robot.robot_name}
+                                                {isConflicted && <span className="text-red-400 text-xs ml-2">⚠️ Conflict</span>}
+                                            </span>
+                                        </label>
+                                    );
+                                })}
+                            </div>
                             {robots.length === 0 && (
                                 <p className="text-xs text-yellow-500 mt-2">⚠️ No robots found. Please add a robot to the database first.</p>
                             )}
@@ -487,14 +595,14 @@ const EventsPage: React.FC = () => {
                             className="bg-gray-900 border border-gray-700 rounded p-2 text-white"
                             value={newEvent.name}
                             onChange={e => setNewEvent({ ...newEvent, name: e.target.value })}
-                            disabled={!newEvent.robot_id}
+                            disabled={newEvent.robot_ids.length === 0}
                         />
                         <input
                             placeholder="Event Type (e.g. Wedding, Conference)"
                             className="bg-gray-900 border border-gray-700 rounded p-2 text-white"
                             value={newEvent.event_type}
                             onChange={e => setNewEvent({ ...newEvent, event_type: e.target.value })}
-                            disabled={!newEvent.robot_id}
+                            disabled={newEvent.robot_ids.length === 0}
                         />
                         <div className="flex items-center bg-gray-900 border border-gray-700 rounded px-2">
                             <Calendar size={16} className="text-gray-500 mr-2" />
@@ -503,7 +611,7 @@ const EventsPage: React.FC = () => {
                                 className="bg-transparent p-2 text-white w-full outline-none"
                                 value={newEvent.event_date}
                                 onChange={e => setNewEvent({ ...newEvent, event_date: e.target.value })}
-                                disabled={!newEvent.robot_id}
+                                disabled={newEvent.robot_ids.length === 0}
                             />
                         </div>
 
@@ -515,7 +623,7 @@ const EventsPage: React.FC = () => {
                                 className="bg-transparent p-2 text-white w-full outline-none"
                                 value={newEvent.start_time}
                                 onChange={e => setNewEvent({ ...newEvent, start_time: e.target.value })}
-                                disabled={!newEvent.robot_id}
+                                disabled={newEvent.robot_ids.length === 0}
                             />
                         </div>
                         <div className="flex items-center bg-gray-900 border border-gray-700 rounded px-2">
@@ -525,7 +633,7 @@ const EventsPage: React.FC = () => {
                                 className="bg-transparent p-2 text-white w-full outline-none"
                                 value={newEvent.end_time}
                                 onChange={e => setNewEvent({ ...newEvent, end_time: e.target.value })}
-                                disabled={!newEvent.robot_id}
+                                disabled={newEvent.robot_ids.length === 0}
                             />
                         </div>
 
@@ -536,7 +644,7 @@ const EventsPage: React.FC = () => {
                                 className="bg-transparent p-2 text-white w-full outline-none"
                                 value={newEvent.location}
                                 onChange={e => setNewEvent({ ...newEvent, location: e.target.value })}
-                                disabled={!newEvent.robot_id}
+                                disabled={newEvent.robot_ids.length === 0}
                             />
                         </div>
 
@@ -547,7 +655,7 @@ const EventsPage: React.FC = () => {
                             className="bg-gray-900 border border-gray-700 rounded p-2 text-white"
                             value={newEvent.event_size}
                             onChange={e => setNewEvent({ ...newEvent, event_size: e.target.value })}
-                            disabled={!newEvent.robot_id}
+                            disabled={newEvent.robot_ids.length === 0}
                             min="0"
                         />
                         <input
@@ -556,7 +664,7 @@ const EventsPage: React.FC = () => {
                             className="bg-gray-900 border border-gray-700 rounded p-2 text-white"
                             value={newEvent.min_age}
                             onChange={e => setNewEvent({ ...newEvent, min_age: e.target.value })}
-                            disabled={!newEvent.robot_id}
+                            disabled={newEvent.robot_ids.length === 0}
                             min="0"
                             max="120"
                         />
@@ -566,7 +674,7 @@ const EventsPage: React.FC = () => {
                             className="bg-gray-900 border border-gray-700 rounded p-2 text-white"
                             value={newEvent.max_age}
                             onChange={e => setNewEvent({ ...newEvent, max_age: e.target.value })}
-                            disabled={!newEvent.robot_id}
+                            disabled={newEvent.robot_ids.length === 0}
                             min="0"
                             max="120"
                         />
@@ -578,7 +686,7 @@ const EventsPage: React.FC = () => {
                                 className="w-full bg-gray-900 border border-gray-700 rounded p-3 text-white outline-none"
                                 value={newEvent.status}
                                 onChange={e => setNewEvent({ ...newEvent, status: e.target.value as any })}
-                                disabled={!newEvent.robot_id}
+                                disabled={newEvent.robot_ids.length === 0}
                             >
                                 <option value="scheduled">Scheduled</option>
                                 <option value="active">Active</option>
@@ -597,7 +705,7 @@ const EventsPage: React.FC = () => {
                                 className="w-full bg-gray-900 border border-gray-700 rounded p-3 text-white focus:border-purple-500 outline-none"
                                 value={newEvent.drink_list_id}
                                 onChange={e => setNewEvent({ ...newEvent, drink_list_id: e.target.value })}
-                                disabled={!newEvent.robot_id}
+                                disabled={newEvent.robot_ids.length === 0}
                             >
                                 <option value="">-- Select Drink Menu (or create new below) --</option>
                                 {drinkLists.map(dl => (
@@ -616,7 +724,7 @@ const EventsPage: React.FC = () => {
                             className="bg-gray-900 border border-gray-700 rounded p-2 text-white md:col-span-2"
                             value={newEvent.description}
                             onChange={e => setNewEvent({ ...newEvent, description: e.target.value })}
-                            disabled={!newEvent.robot_id}
+                            disabled={newEvent.robot_ids.length === 0}
                         />
                     </div>
                     <div className="flex justify-end space-x-2">
@@ -633,7 +741,7 @@ const EventsPage: React.FC = () => {
                         <button
                             onClick={isEditing ? handleUpdate : handleCreate}
                             className="px-6 py-2 bg-green-600 hover:bg-green-700 rounded text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                            disabled={!newEvent.robot_id || !newEvent.name}
+                            disabled={newEvent.robot_ids.length === 0}
                         >
                             {isEditing ? 'Update Event' : 'Create & Manage Drinks →'}
                         </button>

@@ -169,15 +169,15 @@ const Layout: React.FC = () => {
     };
 
     const navItems = [
-        { to: '/', label: 'Robot', icon: Bot },
-        { to: '/manual', label: 'Manual', icon: Gamepad2 },
-        { to: '/autonomous', label: 'Autonomous', icon: Activity },
-        { to: '/monitoring', label: 'Monitoring', icon: LayoutDashboard },
-        { to: '/events', label: 'Events', icon: Calendar },
-        { to: '/drinks', label: 'Drinks', icon: Coffee },
-        { to: '/inventory', label: 'Inventory', icon: Package },
-        { to: '/activity', label: 'Activity', icon: History },
-        { to: '/analytics', label: 'Analytics', icon: BarChart3 },
+        { to: '/admin', label: 'Robot', icon: Bot },
+        { to: '/admin/manual', label: 'Manual', icon: Gamepad2 },
+        { to: '/admin/autonomous', label: 'Autonomous', icon: Activity },
+        { to: '/admin/monitoring', label: 'Monitoring', icon: LayoutDashboard },
+        { to: '/admin/events', label: 'Events', icon: Calendar },
+        { to: '/admin/drinks', label: 'Drinks', icon: Coffee },
+        { to: '/admin/inventory', label: 'Inventory', icon: Package },
+        { to: '/admin/activity', label: 'Activity', icon: History },
+        { to: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
     ];
 
     return (
@@ -195,6 +195,7 @@ const Layout: React.FC = () => {
                         <NavLink
                             key={item.to}
                             to={item.to}
+                            end={item.to === '/admin'} // Only exact match for /admin
                             className={({ isActive }) =>
                                 clsx(
                                     'flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors',

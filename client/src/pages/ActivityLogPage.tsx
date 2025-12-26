@@ -20,15 +20,21 @@ interface ActivityLog {
 
 const ActivityLogPage: React.FC = () => {
     const [logs, setLogs] = useState<ActivityLog[]>([]);
+    const [events, setEvents] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterType, setFilterType] = useState('all');
+    const [selectedEventId, setSelectedEventId] = useState(''); // Empty = all events
     const [page, setPage] = useState(1);
     const ITEMS_PER_PAGE = 50;
 
     useEffect(() => {
+        fetchEvents();
+    }, []);
+
+    useEffect(() => {
         fetchLogs();
-    }, [page, filterType]);
+    }, [page, filterType, selectedEventId]);
 
     const handleDelete = async (logId: string) => {
         if (!supabase) return;
@@ -62,6 +68,20 @@ const ActivityLogPage: React.FC = () => {
         }
     };
 
+    const fetchEvents = async () => {
+        if (!supabase) return;
+        const { data, error } = await supabase
+            .from('events')
+            .select('id, name, event_date')
+            .order('event_date', { ascending: false });
+
+        if (error) {
+            console.error('Error fetching events:', error);
+        } else if (data) {
+            setEvents(data);
+        }
+    };
+
     const fetchLogs = async () => {
         if (!supabase) return;
         setLoading(true);
@@ -81,6 +101,11 @@ const ActivityLogPage: React.FC = () => {
 
             if (filterType !== 'all') {
                 query = query.eq('action', filterType);
+            }
+
+            // Filter by event if selected
+            if (selectedEventId) {
+                query = query.eq('event_id', selectedEventId);
             }
 
             const { data, error } = await query;
@@ -174,9 +199,24 @@ const ActivityLogPage: React.FC = () => {
                     <div className="relative">
                         <Filter size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                         <select
+                            value={selectedEventId}
+                            onChange={e => setSelectedEventId(e.target.value)}
+                            className="pl-10 pr-8 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:border-purple-500 outline-none appearance-none min-w-[200px]"
+                        >
+                            <option value="">All Events</option>
+                            {events.map(event => (
+                                <option key={event.id} value={event.id}>
+                                    {event.name} ({new Date(event.event_date).toLocaleDateString()})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="relative">
+                        <Filter size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <select
                             value={filterType}
                             onChange={e => setFilterType(e.target.value)}
-                            className="pl-10 pr-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:border-purple-500 outline-none appearance-none"
+                            className="pl-10 pr-8 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:border-purple-500 outline-none appearance-none"
                         >
                             <option value="all">All Actions</option>
                             <option value="refill">Refill</option>

@@ -17,17 +17,44 @@ const LoginPage: React.FC = () => {
         setIsLoading(true);
         setError(null);
 
-        const { error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-        });
+        try {
+            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            });
 
-        if (error) {
-            setError(error.message);
+            if (authError) {
+                setError(authError.message);
+                setIsLoading(false);
+                return;
+            }
+
+            if (authData.user) {
+                // Fetch user profile to get role
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('role')
+                    .eq('id', authData.user.id)
+                    .single();
+
+                // Redirect based on role
+                if (profile) {
+                    if (profile.role === 'admin') {
+                        navigate('/admin');
+                    } else if (profile.role === 'staff') {
+                        navigate('/staff');
+                    } else if (profile.role === 'client') {
+                        navigate('/client');
+                    } else {
+                        navigate('/');
+                    }
+                } else {
+                    navigate('/');
+                }
+            }
+        } catch (err: any) {
+            setError('Failed to sign in');
             setIsLoading(false);
-        } else {
-            // Successful login
-            navigate('/');
         }
     };
 
