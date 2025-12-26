@@ -169,7 +169,7 @@ const AutoPage: React.FC = () => {
         // 2. Fetch SCOPED Robot Inventory (New Table: robot_drink_stock)
         const { data: inventoryData } = await supabase
             .from('robot_drink_stock')
-            .select('id, drink_id, quantity')
+            .select('id, drink_id, current_quantity')
             .eq('robot_id', currentRobot.id)
             .eq('event_id', selectedEventId)
             .in('drink_id', drinkIds);
@@ -185,7 +185,7 @@ const AutoPage: React.FC = () => {
                 drink_name: drinkName,
                 initial_quantity: ed.initial_quantity, // Global event limit/stock
                 inventory_id: inv ? inv.id : null,
-                current_quantity: inv ? inv.quantity : 0 // Robot's local stock
+                current_quantity: inv ? inv.current_quantity : 0 // Robot's local stock
             };
         });
 
@@ -277,7 +277,7 @@ const AutoPage: React.FC = () => {
 
                 const { error } = await supabase
                     .from('robot_drink_stock')
-                    .update({ quantity: newQuantity, updated_at: new Date().toISOString() })
+                    .update({ current_quantity: newQuantity, updated_at: new Date().toISOString() })
                     .eq('id', item.inventory_id);
 
                 if (error) throw error;
@@ -298,7 +298,7 @@ const AutoPage: React.FC = () => {
                         robot_id: currentRobot.id,
                         event_id: selectedEventId,
                         drink_id: item.drink_id,
-                        quantity: newQuantity,
+                        current_quantity: newQuantity,
                         max_quantity: 20, // Hardcoded max capacity for robot slot for now
                         updated_at: new Date().toISOString()
                     }, { onConflict: 'robot_id, event_id, drink_id' });
