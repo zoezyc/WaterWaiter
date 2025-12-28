@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Pause, User, Check, Coffee, AlertCircle, Calendar, Bot, LogOut } from 'lucide-react';
 import clsx from 'clsx';
+import AutonomousInteraction from '../components/AutonomousInteraction';
 import { useRobotStore } from '../store/robot.store';
 import { supabase } from '../services/supabase';
 
@@ -281,6 +282,21 @@ const AutoPage: React.FC = () => {
                     .eq('id', item.inventory_id);
 
                 if (error) throw error;
+
+                // DATA LOGGING
+                const { error: logError } = await supabase
+                    .from('activity_log')
+                    .insert({
+                        event_id: selectedEventId,
+                        robot_id: currentRobot.id,
+                        drink_id: item.drink_id,
+                        action: 'take',
+                        quantity_changed: -1,
+                        timestamp: new Date().toISOString(),
+                        note: `Admin manually took 1 ${item.drink_name}`
+                    });
+
+                if (logError) console.error("Logging failed", logError);
 
             } else if (selectedAction === 'ADD') {
                 const quantityToAdd = quantityToAddOverride || 1;

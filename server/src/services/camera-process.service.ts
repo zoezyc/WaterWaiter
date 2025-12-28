@@ -13,8 +13,12 @@ export function startCameraServer(): void {
 
     logger.info('Starting Python camera server...');
 
-    // Determine python command based on OS
-    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+    // Use the venv Python to ensure dependencies like aiohttp are found
+    const pythonCmd = process.platform === 'win32'
+        ? path.resolve(__dirname, '../../../.venv/Scripts/python.exe')
+        : path.resolve(__dirname, '../../../.venv/bin/python3');
+
+    logger.info(`[Camera] Using Python interpreter: ${pythonCmd}`);
 
     cameraProcess = spawn(pythonCmd, [cameraScript], {
         cwd: robotDir,

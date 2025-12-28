@@ -97,6 +97,23 @@ const Layout: React.FC = () => {
             const status = data.status;
             if (status) {
                 const newState = statusToState[status] || 'IDLE';
+
+                // Prevent overwriting active interaction states with 'SERVING'/'INTERACTING' from heartbeat
+                const protectedStates = ['SELECTING_DRINK', 'PROCESSING', 'SERVING'];
+
+                // ERROR FIX: Zustand setters don't support functional updates by default unless implemented manually.
+                // We must read the current state directly.
+                const currentState = useRobotStore.getState().interactionState;
+
+                // If we are deep in interaction, and incoming is just generic "serving" (interacting), ignore it
+                // Note: 'serving' now maps to 'SERVING', so this condition ensures we don't reset to INTERACTING if robot mistakenly sends 'offering'
+                // or if we are in PROCESSING.
+                if (protectedStates.includes(currentState) && newState === 'INTERACTING') {
+                    // Keep current state
+                    return;
+                }
+
+                // Allow transition
                 setInteractionState(newState);
                 setAutonomous(status !== 'idle');
             }

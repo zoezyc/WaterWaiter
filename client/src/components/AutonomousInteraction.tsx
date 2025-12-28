@@ -38,9 +38,12 @@ export default function AutonomousInteraction() {
     useEffect(() => {
         const handleStatus = (data: { status: string }) => {
             console.log('Robot Status Received:', data);
-            if (data.status === 'waiting') {
+            if (data.status === 'waiting' || data.status === 'serving' || data.status === 'offering') {
                 setIsVisible(true);
-                setInteractionPhase('greeting'); // Reset to greeting when robot arrives
+                // Do not reset to greeting if already in selecting/processing to avoid flickering
+                if (!isVisible) {
+                    setInteractionPhase('greeting');
+                }
                 setError(null);
             } else {
                 setIsVisible(false);
