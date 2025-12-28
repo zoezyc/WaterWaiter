@@ -17,6 +17,7 @@ interface RobotState {
     latency: number; // ms
     latencyHistory: number[];
     selectedRobotId: string | null; // UI-level: which robot context admin is viewing
+    alerts: { message: string, timestamp: string, type: 'info' | 'warning' | 'error' }[];
 
     setConnected: (connected: boolean) => void;
     updateStatus: (temp: number) => void;
@@ -30,6 +31,7 @@ interface RobotState {
     incrementUptime: () => void;
     addLatencySample: (ms: number) => void;
     setSelectedRobotId: (id: string | null) => void;
+    addAlert: (alert: { message: string, timestamp: string, type: 'info' | 'warning' | 'error' }) => void;
 }
 
 export const useRobotStore = create<RobotState>()(
@@ -48,6 +50,7 @@ export const useRobotStore = create<RobotState>()(
             latency: 0,
             latencyHistory: [],
             selectedRobotId: null,
+            alerts: [],
 
             setConnected: (connected) => set({ isConnected: connected }),
             updateStatus: (temp) => set({ cpuTemp: temp }),
@@ -64,6 +67,7 @@ export const useRobotStore = create<RobotState>()(
                 return { latencyHistory: newHistory, latency: ms };
             }),
             setSelectedRobotId: (id) => set({ selectedRobotId: id }),
+            addAlert: (alert) => set((state) => ({ alerts: [alert, ...state.alerts].slice(0, 50) })), // Keep last 50
         }),
         {
             name: 'robot-storage',

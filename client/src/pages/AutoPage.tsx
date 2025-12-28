@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import AutonomousInteraction from '../components/AutonomousInteraction';
 import { useRobotStore } from '../store/robot.store';
 import { supabase } from '../services/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 // Unified Interface
 interface MenuItem {
@@ -44,6 +45,8 @@ const AutoPage: React.FC = () => {
         interactionState, setInteractionState,
         selectedRobotId // Get selected robot from header dropdown
     } = useRobotStore();
+
+    const { user } = useAuth();
 
     // Context Selection
     const [events, setEvents] = useState<EventOption[]>([]);
@@ -290,6 +293,7 @@ const AutoPage: React.FC = () => {
                         event_id: selectedEventId,
                         robot_id: currentRobot.id,
                         drink_id: item.drink_id,
+                        user_id: user?.id,
                         action: 'take',
                         quantity_changed: -1,
                         timestamp: new Date().toISOString(),
@@ -332,6 +336,22 @@ const AutoPage: React.FC = () => {
                     console.error("Upsert failed", error);
                     throw error;
                 }
+
+                // DATA LOGGING FOR ADD
+                const { error: logError } = await supabase
+                    .from('activity_log')
+                    .insert({
+                        event_id: selectedEventId,
+                        robot_id: currentRobot.id,
+                        drink_id: item.drink_id,
+                        user_id: user?.id,
+                        action: 'refill',
+                        quantity_changed: quantityToAdd,
+                        timestamp: new Date().toISOString(),
+                        note: `Admin manually added ${quantityToAdd} ${item.drink_name}`
+                    });
+
+                if (logError) console.error("Logging failed", logError);
 
                 if (!item.inventory_id) {
                     fetchMenu(); // Refresh to get the new ID

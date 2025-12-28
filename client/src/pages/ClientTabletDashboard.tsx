@@ -13,7 +13,7 @@ interface MenuItem {
     inventory_id: string | null;
 }
 
-type RobotStatus = 'idle' | 'moving' | 'waiting' | 'offering' | 'returning' | 'error' | 'serving';
+type RobotStatus = 'idle' | 'moving' | 'waiting' | 'offering' | 'returning' | 'error' | 'serving' | 'searching' | 'scanning';
 type ClientPhase = 'waiting' | 'welcome' | 'selecting' | 'quantity' | 'confirm' | 'dispensing' | 'complete';
 
 const getIcon = (name: string) => {
@@ -86,7 +86,7 @@ export default function ClientTabletDashboard() {
                 if (phase !== 'waiting' && phase !== 'dispensing' && phase !== 'complete') {
                     setPhase('waiting');
                 }
-            } else if (status === 'moving') {
+            } else if (status === 'moving' || status === 'searching' || status === 'scanning') {
                 // Robot is searching/approaching - show waiting screen
                 setPhase('waiting');
             } else if (status === 'waiting' || status === 'offering' || status === 'serving') {

@@ -15,7 +15,7 @@ const MetricCard = ({ icon: Icon, label, value, color, unit }: any) => (
 );
 
 const RobotPage: React.FC = () => {
-    const { cpuTemp, isConnected, latency, latencyHistory, uptime } = useRobotStore();
+    const { cpuTemp, isConnected, latency, latencyHistory, uptime, alerts } = useRobotStore();
 
     // Format uptime
     const formatUptime = (seconds: number) => {
@@ -83,6 +83,37 @@ const RobotPage: React.FC = () => {
                                 <p className="text-xs text-gray-500 self-center">No Data</p>
                             )}
                         </div>
+                    </div>
+                </div>
+
+                {/* Recent Alerts */}
+                <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 h-96 flex flex-col">
+                    <h3 className="text-xl font-bold mb-4 flex items-center">
+                        <Activity size={20} className="mr-2 text-yellow-500" />
+                        Recent Alerts
+                    </h3>
+                    <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                        {alerts && alerts.length > 0 ? (
+                            alerts.map((alert, i) => (
+                                <div key={i} className="flex flex-col bg-gray-900/50 p-3 rounded-lg border border-gray-700/50 text-sm">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className={`font-bold uppercase text-xs px-2 py-0.5 rounded ${alert.type === 'error' ? 'bg-red-500/20 text-red-400' :
+                                                alert.type === 'warning' ? 'bg-yellow-500/20 text-yellow-400' :
+                                                    'bg-blue-500/20 text-blue-400'
+                                            }`}>
+                                            {alert.type}
+                                        </span>
+                                        <span className="text-gray-500 text-xs">{alert.timestamp}</span>
+                                    </div>
+                                    <p className="text-gray-300">{alert.message}</p>
+                                </div>
+                            ))
+                        ) : (
+                            <div className="h-full flex flex-col items-center justify-center text-gray-500">
+                                <Activity size={32} className="mb-2 opacity-50" />
+                                <p>No recent alerts logged</p>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
