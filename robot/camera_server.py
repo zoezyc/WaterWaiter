@@ -37,8 +37,11 @@ async def get_frame(request):
     try:
         if robot is None:
             robot = await connect()
+            print("Connected to robot")
+            
+        if camera is None:
             camera = Camera.from_robot(robot, camera_name)
-            print(f"Connected to robot, camera: {camera_name}")
+            print(f"Got camera: {camera_name}")
         
         # Get image from camera - returns ViamImage
         viam_image = await camera.get_image()
@@ -69,8 +72,9 @@ async def get_frame(request):
         })
     except Exception as e:
         print(f"Error getting frame: {e}")
-        import traceback
-        traceback.print_exc()
+        # Reset connection on error to force reconnect
+        robot = None
+        camera = None
         return web.json_response({'error': str(e)}, status=503, headers={
             'Access-Control-Allow-Origin': '*'
         })

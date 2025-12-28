@@ -42,8 +42,8 @@ export const startRobot = async (req: Request, res: Response): Promise<void> => 
         logger.info(`Starting robot script: ${robotScriptPath}`);
         logger.info(`Robot working directory: ${robotDir}`);
 
-        // Use the venv Python (one level up from server dir, not two)
-        const pythonPath = path.join(process.cwd(), '..', '.venv', 'Scripts', 'python.exe');
+        // Use system Python
+        const pythonPath = 'python';
         logger.info(`Using Python: ${pythonPath}`);
 
         robotProcess = spawn(pythonPath, [robotScriptPath], {
@@ -248,7 +248,7 @@ export const manualControl = async (req: Request, res: Response): Promise<void> 
         if (!manualProcess || manualProcess.killed) {
             const manualScriptPath = path.join(process.cwd(), '..', 'robot', 'manual_drive.py');
             const robotDir = path.join(process.cwd(), '..', 'robot');
-            const pythonPath = path.join(process.cwd(), '..', '.venv', 'Scripts', 'python.exe');
+            const pythonPath = 'python';
 
             logger.info(`Spawning manual drive: ${manualScriptPath}`);
             manualProcess = spawn(pythonPath, [manualScriptPath], {

@@ -291,17 +291,26 @@ const AutoPage: React.FC = () => {
                 setSelectedItem({ ...item, current_quantity: newQuantity });
 
                 // UPSERT with UNIQUE constraint
+                // Always include initial_quantity - Supabase needs it for INSERT path
+                // For updates, Supabase ignores it if the row exists (via onConflict)
+                const upsertData: any = {
+                    robot_id: currentRobot.id,
+                    event_id: selectedEventId,
+                    drink_id: item.drink_id,
+                    current_quantity: newQuantity,
+                    initial_quantity: item.initial_quantity || newQuantity, // Use existing or new value
+                    max_quantity: 20,
+                    updated_at: new Date().toISOString()
+                };
+
+                // Include id only for existing records to help with conflict resolution
+                if (item.inventory_id) {
+                    upsertData.id = item.inventory_id;
+                }
+
                 const { error } = await supabase
                     .from('robot_drink_stock')
-                    .upsert({
-                        id: item.inventory_id || undefined,
-                        robot_id: currentRobot.id,
-                        event_id: selectedEventId,
-                        drink_id: item.drink_id,
-                        current_quantity: newQuantity,
-                        max_quantity: 20, // Hardcoded max capacity for robot slot for now
-                        updated_at: new Date().toISOString()
-                    }, { onConflict: 'robot_id, event_id, drink_id' });
+                    .upsert(upsertData, { onConflict: 'robot_id,event_id,drink_id' }); // No spaces!
 
                 if (error) {
                     console.error("Upsert failed", error);

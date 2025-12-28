@@ -2,9 +2,13 @@ import { Router } from 'express';
 import * as robotController from '../controllers/robot.controller';
 import * as drinksController from '../controllers/drinks.controller';
 import * as cameraController from '../controllers/camera.controller';
+import * as authController from '../controllers/auth.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = Router();
+
+// Auth Routes (no auth middleware - client provides user ID after Supabase auth)
+router.get('/auth/profile/:userId', authController.getProfile);
 
 // Robot Routes (no auth for robot script to call)
 router.post('/robot/start', robotController.startRobot);

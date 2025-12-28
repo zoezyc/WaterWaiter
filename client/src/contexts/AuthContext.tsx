@@ -1,3 +1,4 @@
+/* @refresh reset */
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import type { User } from '@supabase/supabase-js';
@@ -30,9 +31,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
 
             try {
-                // Add 3 second timeout for session check
+                // Add 15 second timeout for session check
                 const sessionTimeout = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Session timeout')), 3000)
+                    setTimeout(() => reject(new Error('Session timeout')), 15000)
                 );
 
                 const sessionPromise = supabase.auth.getSession();
@@ -88,62 +89,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const fetchProfile = async (userId: string) => {
-        if (!supabase) {
-            console.warn('[AuthContext] Supabase not initialized');
-            setLoading(false);
-            return;
-        }
-
         try {
-            console.log('[AuthContext] Fetching profile for user:', userId);
+            console.log('[AuthContext] Fetching profile from backend for user:', userId);
 
-            // Add timeout to prevent hanging
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
-            );
+            // Use backend API which uses service role key (bypasses RLS)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-            const fetchPromise = supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', userId)
-                .single();
+            const response = await fetch(`http://localhost:3000/api/v1/auth/profile/${userId}`, {
+                signal: controller.signal
+            });
 
-            const { data, error } = await Promise.race([fetchPromise, timeoutPromise]) as any;
+            clearTimeout(timeoutId);
 
-            if (error) {
-                console.error('[AuthContext] Error fetching profile:', error);
-
-                // If profile doesn't exist, create a default or require user to logout
-                if (error.code === 'PGRST116') {
-                    console.warn('[AuthContext] Profile not found in database. User needs a profile created.');
-                    alert('Your account does not have a profile. Please contact the administrator.');
-                    await signOut();
-                }
-
+            if (!response.ok) {
+                const errorData = await response.json();
+                console.error('[AuthContext] Profile fetch error:', errorData);
+                alert('Your account does not have a profile. Please contact the administrator.');
+                await signOut();
                 setLoading(false);
                 return;
             }
 
-            if (data) {
-                console.log('[AuthContext] Profile loaded, role:', data.role);
-                setProfile(data);
-                setRole(data.role);
-            } else {
-                console.warn('[AuthContext] No profile data found for user');
-                alert('Your account does not have a role assigned. Please contact the administrator.');
-                await signOut();
-            }
+            const data = await response.json();
+            console.log('[AuthContext] Profile loaded, role:', data.role);
+            setProfile(data);
+            setRole(data.role);
             setLoading(false);
         } catch (error: any) {
             console.error('[AuthContext] Exception in fetchProfile:', error);
-            console.error('[AuthContext] Error details:', {
-                message: error?.message,
-                code: error?.code,
-                details: error?.details,
-                hint: error?.hint
-            });
-            if (error.message === 'Profile fetch timeout') {
-                alert('Unable to load your profile. Please try again or contact support.');
+            if (error.name === 'AbortError') {
+                alert('Profile fetch timed out. Please check your network connection.');
             }
             setLoading(false);
         }

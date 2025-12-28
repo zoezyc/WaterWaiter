@@ -8,11 +8,7 @@ let cameraProcess: ChildProcess | null = null;
  * Start the Python camera server as a child process
  */
 export function startCameraServer(): void {
-    // Temporarily disabled - requires aiohttp installation
-    logger.info('Camera server disabled (install aiohttp in venv to enable)');
-    return;
-
-    /* const robotDir = path.resolve(__dirname, '../../../robot');
+    const robotDir = path.resolve(__dirname, '../../../robot');
     const cameraScript = path.join(robotDir, 'camera_server.py');
 
     logger.info('Starting Python camera server...');
@@ -43,7 +39,7 @@ export function startCameraServer(): void {
             logger.warn(`Camera server exited with code ${code}`);
         }
         cameraProcess = null;
-    }); */
+    });
 }
 
 /**
