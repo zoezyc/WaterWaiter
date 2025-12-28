@@ -31,7 +31,8 @@ const Layout: React.FC = () => {
         incrementUptime,
         addLatencySample,
         selectedRobotId,
-        setSelectedRobotId
+        setSelectedRobotId,
+        addAlert
     } = useRobotStore();
 
     const [session, setSession] = React.useState<Session | null>(null);
@@ -76,11 +77,13 @@ const Layout: React.FC = () => {
         const onConnect = () => {
             console.log("Socket Connected");
             setConnected(true);
+            addAlert({ message: 'System connected to server', timestamp: new Date().toLocaleTimeString(), type: 'info' });
         };
 
         const onDisconnect = () => {
             console.log("Socket Disconnected");
             setConnected(false);
+            addAlert({ message: 'System disconnected from server', timestamp: new Date().toLocaleTimeString(), type: 'error' });
         };
 
         const onRobotStatus = (data: any) => {
@@ -93,14 +96,56 @@ const Layout: React.FC = () => {
                 // latency is updated by heartbeat now
             });
 
+            // Force online if we receive data
+            setConnected(true);
+
             // Update Interaction State
             const status = data.status;
             if (status) {
                 const newState = statusToState[status] || 'IDLE';
+
+                // Prevent overwriting active interaction states with 'SERVING'/'INTERACTING' from heartbeat
+                const protectedStates = ['SELECTING_DRINK', 'PROCESSING', 'SERVING'];
+
+                // ERROR FIX: Zustand setters don't support functional updates by default unless implemented manually.
+                // We must read the current state directly.
+                const currentState = useRobotStore.getState().interactionState;
+
+                // Log Phase Change
+                console.log(`[Layout] Status: ${status} | Current: ${currentState} -> New: ${newState}`);
+
+                if (currentState !== newState) {
+                    // Filter out noise
+                    if (!protectedStates.includes(currentState)) {
+                        console.log(`[Layout] Adding Alert: Phase changed logic matched`);
+                        addAlert({
+                            message: `Phase changed: ${currentState} -> ${newState}`,
+                            timestamp: new Date().toLocaleTimeString(),
+                            type: 'info'
+                        });
+                    } else {
+                        console.log(`[Layout] Skipped Alert: Protected State ${currentState}`);
+                    }
+                }
+
+                // If we are deep in interaction, and incoming is just generic "serving" (interacting), ignore it
+                // Note: 'serving' now maps to 'SERVING', so this condition ensures we don't reset to INTERACTING if robot mistakenly sends 'offering'
+                // or if we are in PROCESSING.
+                if (protectedStates.includes(currentState) && newState === 'INTERACTING') {
+                    // Keep current state
+                    return;
+                }
+
+                // Allow transition
                 setInteractionState(newState);
                 setAutonomous(status !== 'idle');
             }
         };
+
+        // Check initial socket state
+        if (socket.connected) {
+            setConnected(true);
+        }
 
         const onConnectError = (err: any) => {
             console.error("Socket Connection Error:", err);

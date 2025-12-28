@@ -177,21 +177,49 @@ async def person_detect(detector: VisionClient, base: Base):
 
             except Exception as e:
                 print(f"Error in person_detect: {e}")
+                # If connection error, re-raise to trigger reconnection in main
+                err_str = str(e).lower()
+                if "closed" in err_str or "connection" in err_str or "deadline" in err_str or "channel" in err_str or "session_expired" in err_str or "offline" in err_str or "not found" in err_str:
+                    logger_msg = f"Critical connection error: {e}"
+                    print(logger_msg)
+                    raise e
 
             await asyncio.sleep(pause_interval)
 
 
+
+async def run_robot_cycle():
+    """Single cycle of robot connection and operation"""
+    robot = None
+    try:
+        print("Connecting to robot...")
+        robot = await connect()
+        print("Robot connected.")
+        
+        base = Base.from_robot(robot, base_name)
+        detector = VisionClient.from_robot(robot, name=detector_name)
+
+        # Person tracking with dashboard integration
+        # We run this until it raises an exception (e.g. connection lost)
+        await person_detect(detector, base)
+        
+    except Exception as e:
+        print(f"Robot cycle error: {e}")
+        raise e  # Propagate to main loop
+    finally:
+        if robot:
+            print("Closing robot connection...")
+            await robot.close()
+
+
 async def main():
-    robot = await connect()
-    base = Base.from_robot(robot, base_name)
-    detector = VisionClient.from_robot(robot, name=detector_name)
-
-    # Person tracking with dashboard integration
-    person_task = asyncio.create_task(person_detect(detector, base))
-    
-    await asyncio.gather(person_task, return_exceptions=True)
-
-    await robot.close()
+    while True:
+        try:
+            await run_robot_cycle()
+        except Exception as e:
+            print(f"Robot disconnected/crashed. Retrying in 5 seconds... Error: {e}")
+        
+        await asyncio.sleep(5)
 
 
 if __name__ == "__main__":

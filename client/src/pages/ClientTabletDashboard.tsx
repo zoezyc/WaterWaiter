@@ -13,7 +13,7 @@ interface MenuItem {
     inventory_id: string | null;
 }
 
-type RobotStatus = 'idle' | 'moving' | 'waiting' | 'offering' | 'returning' | 'error';
+type RobotStatus = 'idle' | 'moving' | 'waiting' | 'offering' | 'returning' | 'error' | 'serving' | 'searching' | 'scanning';
 type ClientPhase = 'waiting' | 'welcome' | 'selecting' | 'quantity' | 'confirm' | 'dispensing' | 'complete';
 
 const getIcon = (name: string) => {
@@ -35,8 +35,44 @@ export default function ClientTabletDashboard() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const { activeEventId, activeRobot } = useRobotStore();
+    const { activeEventId, activeRobot, setActiveEventId, setActiveRobot } = useRobotStore();
     const { user, signOut } = useAuth();
+
+    // Auto-detect active event/robot context if missing (Client Mode)
+    useEffect(() => {
+        const fetchContext = async () => {
+            if (activeEventId && activeRobot) return;
+
+            // 1. Get latest active event
+            const { data: events } = await supabase
+                .from('events')
+                .select('id, name')
+                .eq('status', 'active')
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            if (events && events.length > 0) {
+                const event = events[0];
+                if (!activeEventId) setActiveEventId(event.id);
+
+                // 2. Get first robot attached to this event
+                if (!activeRobot) {
+                    const { data: robots } = await supabase
+                        .from('event_robot')
+                        .select('robot:robots(id, robot_name)')
+                        .eq('event_id', event.id)
+                        .limit(1);
+
+                    if (robots && robots.length > 0) {
+                        const r = robots[0].robot as any;
+                        if (r) setActiveRobot({ id: r.id, robot_name: r.robot_name });
+                    }
+                }
+            }
+        };
+
+        fetchContext();
+    }, [activeEventId, activeRobot]);
 
     // Listen to robot status via socket
     useEffect(() => {
@@ -50,10 +86,10 @@ export default function ClientTabletDashboard() {
                 if (phase !== 'waiting' && phase !== 'dispensing' && phase !== 'complete') {
                     setPhase('waiting');
                 }
-            } else if (status === 'moving') {
+            } else if (status === 'moving' || status === 'searching' || status === 'scanning') {
                 // Robot is searching/approaching - show waiting screen
                 setPhase('waiting');
-            } else if (status === 'waiting' || status === 'offering') {
+            } else if (status === 'waiting' || status === 'offering' || status === 'serving') {
                 // Robot found customer and waiting - show welcome screen
                 if (phase === 'waiting') {
                     setPhase('welcome');
@@ -168,8 +204,18 @@ export default function ClientTabletDashboard() {
 
             setPhase('complete');
 
-            // Auto-reset after 5 seconds
-            setTimeout(() => {
+            // Auto-reset after 5 seconds and tell robot to proceed
+            setTimeout(async () => {
+                try {
+                    // Tell robot to move to next customer
+                    await fetch('/api/v1/robot/interact', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ command: 'proceed' })
+                    });
+                } catch (e) {
+                    console.error("Failed to release robot:", e);
+                }
                 resetFlow();
             }, 5000);
 
@@ -185,6 +231,19 @@ export default function ClientTabletDashboard() {
         setSelectedDrink(null);
         setQuantity(1);
         setError(null);
+    };
+
+    const handleNoThanks = async () => {
+        try {
+            await fetch('/api/v1/robot/interact', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: 'proceed' })
+            });
+        } catch (e) {
+            console.error("Error ending interaction:", e);
+        }
+        resetFlow();
     };
 
     const incrementQuantity = () => {
@@ -262,12 +321,20 @@ export default function ClientTabletDashboard() {
                                 <h2 className="text-5xl font-bold mb-4">Welcome!</h2>
                                 <p className="text-gray-400 text-xl">What would you like today?</p>
                             </div>
-                            <button
-                                onClick={() => setPhase('selecting')}
-                                className="px-12 py-6 bg-gradient-to-r from-blue-600 to-violet-600 rounded-2xl text-2xl font-bold shadow-2xl hover:scale-105 transition-transform"
-                            >
-                                Get a Drink
-                            </button>
+                            <div className="flex gap-4 justify-center">
+                                <button
+                                    onClick={() => setPhase('selecting')}
+                                    className="px-10 py-6 bg-gradient-to-r from-blue-600 to-violet-600 rounded-2xl text-2xl font-bold shadow-xl hover:scale-105 transition-transform"
+                                >
+                                    Get a Drink
+                                </button>
+                                <button
+                                    onClick={handleNoThanks}
+                                    className="px-10 py-6 bg-gray-700/50 border border-gray-600 rounded-2xl text-2xl font-bold hover:bg-gray-700 hover:scale-105 transition-transform text-gray-300"
+                                >
+                                    No Thanks
+                                </button>
+                            </div>
                         </div>
                     )}
 
