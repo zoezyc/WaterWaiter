@@ -16,15 +16,6 @@ interface MenuItem {
 type RobotStatus = 'idle' | 'moving' | 'waiting' | 'offering' | 'returning' | 'error' | 'serving' | 'searching' | 'scanning';
 type ClientPhase = 'waiting' | 'welcome' | 'selecting' | 'quantity' | 'confirm' | 'dispensing' | 'complete';
 
-const getIcon = (name: string) => {
-    const n = name.toLowerCase();
-    if (n.includes('water')) return '💧';
-    if (n.includes('coffee') || n.includes('latte')) return '☕';
-    if (n.includes('soda') || n.includes('cola')) return '🥤';
-    if (n.includes('juice') || n.includes('orange')) return '🧃';
-    if (n.includes('tea')) return '🍵';
-    return '🥛';
-};
 
 export default function ClientTabletDashboard() {
     const [phase, setPhase] = useState<ClientPhase>('waiting');
@@ -359,7 +350,6 @@ export default function ClientTabletDashboard() {
                                             onClick={() => handleDrinkSelect(item)}
                                             className="p-8 bg-gray-800/50 border border-gray-700 rounded-2xl hover:bg-gray-700/50 hover:border-blue-500/50 transition flex flex-col items-center space-y-4"
                                         >
-                                            <span className="text-6xl">{getIcon(item.drink_name)}</span>
                                             <span className="font-bold text-xl text-center">{item.drink_name}</span>
                                             <span className="text-sm text-green-400">Stock: {item.current_quantity}</span>
                                         </button>
@@ -380,7 +370,6 @@ export default function ClientTabletDashboard() {
                     {phase === 'quantity' && selectedDrink && (
                         <div className="space-y-8 animate-in fade-in zoom-in duration-300">
                             <div className="text-center">
-                                <span className="text-7xl block mb-4">{getIcon(selectedDrink.drink_name)}</span>
                                 <h2 className="text-3xl font-bold mb-2">{selectedDrink.drink_name}</h2>
                                 <p className="text-gray-400">Available: {selectedDrink.current_quantity}</p>
                             </div>
@@ -436,7 +425,6 @@ export default function ClientTabletDashboard() {
                             <div className="text-center">
                                 <h2 className="text-3xl font-bold mb-8">Confirm Your Order</h2>
                                 <div className="bg-gray-800/50 border border-gray-700 rounded-2xl p-8">
-                                    <span className="text-7xl block mb-4">{getIcon(selectedDrink.drink_name)}</span>
                                     <p className="text-4xl font-bold mb-2">
                                         {quantity} × {selectedDrink.drink_name}
                                     </p>
@@ -492,7 +480,6 @@ export default function ClientTabletDashboard() {
                                 <Check size={48} className="text-green-400" />
                             </div>
                             <h2 className="text-5xl font-bold">Enjoy!</h2>
-                            <div className="text-7xl">{getIcon(selectedDrink.drink_name)}</div>
                             <p className="text-2xl text-gray-400">
                                 {quantity === 1 ? 'Your drink is ready' : `Your ${quantity} drinks are ready`}
                             </p>

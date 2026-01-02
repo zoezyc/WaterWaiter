@@ -14,16 +14,6 @@ interface MenuItem {
     inventory_id: string | null;
 }
 
-// Map drink names to icons
-const getIcon = (name: string) => {
-    const n = name.toLowerCase();
-    if (n.includes('water')) return '💧';
-    if (n.includes('coffee') || n.includes('latte')) return '☕';
-    if (n.includes('soda') || n.includes('cola')) return '🥤';
-    if (n.includes('juice') || n.includes('orange')) return '🧃';
-    if (n.includes('tea')) return '🍵';
-    return '🥛';
-};
 
 export default function AutonomousInteraction() {
     const [isVisible, setIsVisible] = useState(false);
@@ -288,7 +278,6 @@ export default function AutonomousInteraction() {
                                                 "hover:bg-gray-700 hover:border-gray-500 hover:scale-[1.02]"
                                             )}
                                         >
-                                            <span className="text-3xl">{getIcon(item.drink_name)}</span>
                                             <span className="font-semibold text-sm text-center">{item.drink_name}</span>
                                             <span className="text-xs text-green-400">
                                                 Stock: {item.current_quantity}
@@ -327,7 +316,6 @@ export default function AutonomousInteraction() {
                                 <CheckCircle className="text-green-400" size={48} />
                             </div>
                             <h3 className="text-3xl font-bold text-white">Enjoy!</h3>
-                            <div className="text-4xl">{getIcon(selectedDrink.drink_name)}</div>
                             <p className="text-gray-400">Here is your {selectedDrink.drink_name}</p>
                             <p className="text-sm text-gray-600 mt-8">Moving to next customer in 3s...</p>
                         </div>

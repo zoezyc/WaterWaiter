@@ -26,16 +26,6 @@ interface EventOption {
     event_type: string;
 }
 
-// Map some icons based on name for visual flair
-const getIcon = (name: string) => {
-    const n = name.toLowerCase();
-    if (n.includes('water')) return '💧';
-    if (n.includes('coffee') || n.includes('latte')) return '☕';
-    if (n.includes('soda') || n.includes('cola')) return '🥤';
-    if (n.includes('juice') || n.includes('orange')) return '🧃';
-    if (n.includes('tea')) return '🍵';
-    return '🥛';
-};
 
 const AutoPage: React.FC = () => {
     const {
@@ -637,9 +627,6 @@ const AutoPage: React.FC = () => {
                                                     : "hover:bg-gray-700 hover:border-gray-500 hover:scale-[1.02]"
                                             )}
                                         >
-                                            <span className="text-2xl">
-                                                {getIcon(item.drink_name)}
-                                            </span>
                                             <div className="text-left">
                                                 <span className="font-semibold text-lg block">{item.drink_name}</span>
                                                 <span className={clsx("text-xs", item.current_quantity > 0 ? "text-green-400" : "text-red-400")}>
