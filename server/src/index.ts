@@ -10,8 +10,8 @@ const server = http.createServer(app);
 // WebSocket Setup - use socketService so controllers can emit events
 socketService.initialize(server);
 
-// Start Server
-server.listen(config.port, () => {
+// Start Server - Listen on all network interfaces for tablet/hotspot access
+server.listen(config.port as number, '0.0.0.0', () => {
     logger.info(`Server running on port ${config.port} in ${config.nodeEnv} mode`);
 
     // Start the Python camera server as a child process

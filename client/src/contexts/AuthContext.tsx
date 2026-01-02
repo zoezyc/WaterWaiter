@@ -90,37 +90,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const fetchProfile = async (userId: string) => {
         try {
-            console.log('[AuthContext] Fetching profile from backend for user:', userId);
+            console.log('[AuthContext] Fetching profile for user:', userId);
 
-            // Use backend API which uses service role key (bypasses RLS)
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            if (!supabase) {
+                console.error('[AuthContext] Supabase client not available');
+                setLoading(false);
+                return;
+            }
 
-            const response = await fetch(`http://localhost:3000/api/v1/auth/profile/${userId}`, {
-                signal: controller.signal
-            });
+            // Fetch directly from Supabase (bypasses CORS issues on mobile/tablet)
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .single();
 
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                console.error('[AuthContext] Profile fetch error:', errorData);
+            if (error || !data) {
+                console.error('[AuthContext] Profile fetch error:', error);
                 alert('Your account does not have a profile. Please contact the administrator.');
                 await signOut();
                 setLoading(false);
                 return;
             }
 
-            const data = await response.json();
             console.log('[AuthContext] Profile loaded, role:', data.role);
             setProfile(data);
             setRole(data.role);
             setLoading(false);
         } catch (error: any) {
             console.error('[AuthContext] Exception in fetchProfile:', error);
-            if (error.name === 'AbortError') {
-                alert('Profile fetch timed out. Please check your network connection.');
-            }
+            alert('Error loading profile. Please try again.');
             setLoading(false);
         }
     };
