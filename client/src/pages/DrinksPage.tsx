@@ -174,7 +174,23 @@ const DrinksPage: React.FC = () => {
 
     const handleDelete = async (id: string) => {
         if (!supabase) return;
-        if (!confirm("Remove this drink from the event inventory?")) return;
+
+        // Check if this drink is actively being used or has logs (optional, but good for safety)
+        // For 'event_drinks' (removing from THIS event), it's less risky than deleting the global drink.
+        // But we can check if it has been served.
+
+        const { count, error: countError } = await supabase
+            .from('activity_log')
+            .select('*', { count: 'exact', head: true })
+            .eq('drink_id', id)
+            .eq('event_id', eventId!);
+
+        let warning = "Remove this drink from the event inventory?";
+        if (count && count > 0) {
+            warning = `This drink has been served ${count} times in this event. Removing it will keep the logs but remove it from the menu. Proceed?`;
+        }
+
+        if (!confirm(warning)) return;
         const { error } = await supabase.from('event_drinks').delete().eq('id', id);
         if (!error) fetchEventDrinks();
     };
@@ -286,7 +302,27 @@ const DrinksPage: React.FC = () => {
     };
 
     const handleDeleteList = async (listId: string) => {
-        if (!supabase || !confirm('Delete this drink list? This will also delete all drinks in it.')) return;
+        if (!supabase) return;
+
+        // 1. Check for dependent Events
+        const { data: dependentEvents, error: checkError } = await supabase
+            .from('events')
+            .select('name')
+            .eq('drink_list_id', listId);
+
+        if (checkError) {
+            alert("Error checking dependencies: " + checkError.message);
+            return;
+        }
+
+        let message = 'Delete this drink list? This will also delete all drinks in it.';
+
+        if (dependentEvents && dependentEvents.length > 0) {
+            const eventNames = dependentEvents.map(e => e.name).join(', ');
+            message = `WARNING: This list is currently used by the following events:\n\n${eventNames}\n\nDeleting this list will PERMANENTLY DELETE these events and their history. Are you sure?`;
+        }
+
+        if (!confirm(message)) return;
 
         const { error } = await supabase.from('drink_list').delete().eq('id', listId);
         if (!error) {
@@ -295,6 +331,8 @@ const DrinksPage: React.FC = () => {
                 setListDrinks([]);
             }
             fetchDrinkLists();
+        } else {
+            alert('Error deleting list: ' + error.message);
         }
     };
 
@@ -377,12 +415,32 @@ const DrinksPage: React.FC = () => {
     };
 
     const handleDeleteDrink = async (drinkId: string) => {
-        if (!supabase || !confirm('Delete this drink?')) return;
+        if (!supabase) return;
+
+        // 1. Check if this drink is in any *other* events' inventory (event_drinks) and logs
+        const { count: usageCount, error: checkError } = await supabase
+            .from('event_drinks')
+            .select('*', { count: 'exact', head: true })
+            .eq('drink_id', drinkId);
+
+        if (checkError) {
+            alert("Error checking drink usage: " + checkError.message);
+            return;
+        }
+
+        let message = 'Delete this drink?';
+        if (usageCount && usageCount > 0) {
+            message = `WARNING: This drink is currently included in ${usageCount} event inventories.\n\nDeleting it will remove it from those events and delete related statistics. Proceed?`;
+        }
+
+        if (!confirm(message)) return;
 
         const { error } = await supabase.from('drinks').delete().eq('id', drinkId);
         if (!error && selectedListId) {
             fetchListDrinks(selectedListId);
             fetchDrinkLists(); // Refresh count
+        } else if (error) {
+            alert('Error deleting drink: ' + error.message);
         }
     };
 
