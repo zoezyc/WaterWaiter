@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, Cpu, Activity, Wifi, Map } from 'lucide-react';
+import { AlertTriangle, Activity, Wifi } from 'lucide-react';
 import { useRobotStore } from '../store/robot.store';
 import clsx from 'clsx';
 import CameraFeed from '../components/CameraFeed';
@@ -13,7 +13,6 @@ const formatUptime = (seconds: number) => {
 
 const MonitorPage: React.FC = () => {
     // Use granular selectors for better performance and render stability
-    const cpuTemp = useRobotStore(state => state.cpuTemp);
     const isConnected = useRobotStore(state => state.isConnected);
     const uptime = useRobotStore(state => state.uptime);
     const bboxHeight = useRobotStore(state => state.bboxHeight);
@@ -28,16 +27,7 @@ const MonitorPage: React.FC = () => {
     return (
         <div className="space-y-6">
             {/* Top Row: System Health */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex items-center space-x-4">
-                    <div className="p-3 bg-red-500/20 rounded-lg text-red-400">
-                        <Cpu size={24} />
-                    </div>
-                    <div>
-                        <p className="text-gray-400 text-sm">CPU Temperature</p>
-                        <p className="text-xl font-bold">{cpuTemp}°C</p>
-                    </div>
-                </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex items-center space-x-4">
                     <div className="p-3 bg-purple-500/20 rounded-lg text-purple-400">
                         <Activity size={24} />
@@ -64,20 +54,6 @@ const MonitorPage: React.FC = () => {
                 {/* Main Camera Feed */}
                 <div className="lg:col-span-2 space-y-6">
                     <CameraFeed refreshInterval={500} className="shadow-2xl" />
-
-                    {/* Path Trace Placeholder */}
-                    <div className="bg-gray-800 rounded-xl p-4 border border-gray-700 h-64 relative overflow-hidden">
-                        <h3 className="font-semibold mb-3 flex items-center text-gray-400">
-                            <Map size={18} className="mr-2" />
-                            Motion Path Trace
-                        </h3>
-                        <div className="absolute inset-0 flex items-center justify-center opacity-20">
-                            <svg width="100%" height="100%" viewBox="0 0 400 200">
-                                <path d="M 50 150 Q 200 150 200 100 T 350 50" stroke="cyan" strokeWidth="4" fill="none" strokeDasharray="5,5" />
-                                <circle cx="350" cy="50" r="8" fill="cyan" />
-                            </svg>
-                        </div>
-                    </div>
                 </div>
 
                 {/* Sensor & Feedback */}

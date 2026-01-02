@@ -40,26 +40,31 @@ const AnalyticsPage: React.FC = () => {
         setLoading(true);
 
         try {
-            // Fetch all 'take' actions with event and drink data
+            // Fetch all 'take' actions from CLIENT users only with event and drink data
             const { data: logs, error } = await supabase
                 .from('activity_log')
                 .select(`
                     *,
                     drinks(name, drink_list:drink_list_id(name)),
-                    events(name, event_type, min_age, max_age)
+                    events(name, event_type, min_age, max_age),
+                    profiles(role)
                 `)
                 .eq('action', 'take');
 
             if (error) throw error;
 
             if (logs) {
+                // Filter to only include client actions
+                const clientLogs = logs.filter((log: any) => log.profiles?.role === 'client');
+
                 // Calculate overall statistics
                 const drinkCounts: Record<string, number> = {};
                 const eventTypes = new Set<string>();
 
-                logs.forEach((log: any) => {
+                clientLogs.forEach((log: any) => {
                     const drinkName = log.drinks?.name || 'Unknown';
-                    drinkCounts[drinkName] = (drinkCounts[drinkName] || 0) + log.quantity_changed;
+                    // Use Math.abs to ensure positive numbers
+                    drinkCounts[drinkName] = (drinkCounts[drinkName] || 0) + Math.abs(log.quantity_changed);
                     if (log.events?.event_type) eventTypes.add(log.events.event_type);
                 });
 
@@ -74,13 +79,13 @@ const AnalyticsPage: React.FC = () => {
 
                 // Calculate by event type
                 const byEventType: Record<string, Record<string, number>> = {};
-                logs.forEach((log: any) => {
+                clientLogs.forEach((log: any) => {
                     const eventType = log.events?.event_type || 'Unknown';
                     const drinkName = log.drinks?.name || 'Unknown';
 
                     if (!byEventType[eventType]) byEventType[eventType] = {};
                     byEventType[eventType][drinkName] =
-                        (byEventType[eventType][drinkName] || 0) + log.quantity_changed;
+                        (byEventType[eventType][drinkName] || 0) + Math.abs(log.quantity_changed);
                 });
 
                 const eventTypesData = Object.entries(byEventType).map(([event_type, drinks]) => ({
@@ -95,7 +100,7 @@ const AnalyticsPage: React.FC = () => {
 
                 // Calculate by age group
                 const byAgeGroup: Record<string, Record<string, number>> = {};
-                logs.forEach((log: any) => {
+                clientLogs.forEach((log: any) => {
                     const minAge = log.events?.min_age || 0;
                     let ageRange = '41+';
 
@@ -107,7 +112,7 @@ const AnalyticsPage: React.FC = () => {
 
                     if (!byAgeGroup[ageRange]) byAgeGroup[ageRange] = {};
                     byAgeGroup[ageRange][drinkName] =
-                        (byAgeGroup[ageRange][drinkName] || 0) + log.quantity_changed;
+                        (byAgeGroup[ageRange][drinkName] || 0) + Math.abs(log.quantity_changed);
                 });
 
                 const ageGroupsData = Object.entries(byAgeGroup).map(([age_range, drinks]) => ({
@@ -125,9 +130,9 @@ const AnalyticsPage: React.FC = () => {
 
                 // Calculate by drink list
                 const byDrinkList: Record<string, number> = {};
-                logs.forEach((log: any) => {
+                clientLogs.forEach((log: any) => {
                     const drinkListName = log.drinks?.drink_list?.name || 'Unknown';
-                    byDrinkList[drinkListName] = (byDrinkList[drinkListName] || 0) + log.quantity_changed;
+                    byDrinkList[drinkListName] = (byDrinkList[drinkListName] || 0) + Math.abs(log.quantity_changed);
                 });
 
                 const drinkListData = Object.entries(byDrinkList)

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Pause, User, Check, Coffee, AlertCircle, Calendar, Bot, LogOut } from 'lucide-react';
 import clsx from 'clsx';
-import AutonomousInteraction from '../components/AutonomousInteraction';
+
 import { useRobotStore } from '../store/robot.store';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -86,7 +86,7 @@ const AutoPage: React.FC = () => {
             console.log('📋 Event-Robot assignments:', eventRobots);
 
             if (!eventRobots || eventRobots.length === 0) {
-                console.warn('⚠️ No events assigned to this robot. Showing all active events as fallback.');
+                console.warn('No events assigned to this robot. Showing all active events as fallback.');
                 // Fallback: Show all events if robot has no assignments
                 const { data } = await supabase
                     .from('events')
@@ -108,12 +108,12 @@ const AutoPage: React.FC = () => {
                 .in('status', ['scheduled', 'active']) // Show both scheduled and active
                 .order('created_at', { ascending: false });
 
-            console.log('✅ Final events query result:', data, 'Error:', error);
+            console.log('Final events query result:', data, 'Error:', error);
             if (data) {
                 console.log('📊 Setting', data.length, 'events to state');
                 setEvents(data);
             } else {
-                console.error('❌ No data returned from events query');
+                console.error('No data returned from events query');
             }
         } else {
             console.log('ℹ️ No robot selected, fetching all active events');

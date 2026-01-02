@@ -148,7 +148,7 @@ const ActivityLogPage: React.FC = () => {
             log.robot_name || 'N/A',
             log.event_name || 'N/A',
             log.drink_name || 'N/A',
-            log.user_name || 'System',
+            log.user_name || 'Admin',
             log.action,
             log.quantity_changed,
             log.note || ''
@@ -259,7 +259,7 @@ const ActivityLogPage: React.FC = () => {
                                         <td className="p-4 font-medium">{log.robot_name || 'Unknown'}</td>
                                         <td className="p-4 text-gray-400">{log.event_name || 'N/A'}</td>
                                         <td className="p-4 text-gray-400">{log.drink_name || 'N/A'}</td>
-                                        <td className="p-4 text-gray-400">{log.user_name || 'System'}</td>
+                                        <td className="p-4 text-gray-400">{log.user_name || 'Admin'}</td>
                                         <td className="p-4 text-center">
                                             <span className={`px-2 py-1 rounded text-xs font-bold ${getActivityColor(log.action)}`}>
                                                 {log.action.toUpperCase()}

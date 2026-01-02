@@ -40,39 +40,39 @@ const EventsPage: React.FC = () => {
 
     const fetchEvents = async () => {
         if (!supabase) {
-            console.log('⚠️ Supabase client not initialized');
+            console.log('Supabase client not initialized');
             return;
         }
         setIsLoading(true);
         console.log('🔍 Fetching events...');
         const { data, error } = await supabase.from('events').select('*').order('created_at', { ascending: false });
-        if (error) console.error('❌ Error fetching events:', error);
-        console.log('✅ Events fetched:', data?.length || 0, 'items', data);
+        if (error) console.error('Error fetching events:', error);
+        console.log('Events fetched:', data?.length || 0, 'items', data);
         if (data) setEvents(data);
         setIsLoading(false);
     };
 
     const fetchDrinkLists = async () => {
         if (!supabase) {
-            console.log('⚠️ Supabase client not initialized');
+            console.log('Supabase client not initialized');
             return;
         }
         console.log('🔍 Fetching drink lists...');
         const { data, error } = await supabase.from('drink_list').select('*').order('created_at', { ascending: false });
-        if (error) console.error('❌ Error fetching drink lists:', error);
-        console.log('✅ Drink lists fetched:', data?.length || 0, 'items', data);
+        if (error) console.error('Error fetching drink lists:', error);
+        console.log('Drink lists fetched:', data?.length || 0, 'items', data);
         if (data) setDrinkLists(data);
     };
 
     const fetchRobots = async () => {
         if (!supabase) {
-            console.log('⚠️ Supabase client not initialized');
+            console.log('Supabase client not initialized');
             return;
         }
         console.log('🔍 Fetching robots...');
         const { data, error } = await supabase.from('robots').select('*').order('robot_name');
-        if (error) console.error('❌ Error fetching robots:', error);
-        console.log('✅ Robots fetched:', data?.length || 0, 'items', data);
+        if (error) console.error('Error fetching robots:', error);
+        console.log('Robots fetched:', data?.length || 0, 'items', data);
         if (data) setRobots(data);
     };
 
@@ -228,7 +228,7 @@ const EventsPage: React.FC = () => {
                 console.error('Error creating event drinks:', eventDrinksError);
                 alert('Event created but failed to populate drinks inventory. You can add drinks manually.');
             } else {
-                console.log(`✅ Auto-populated ${drinksInList.length} drinks to event inventory`);
+                console.log(`Auto-populated ${drinksInList.length} drinks to event inventory`);
 
                 // LOOP through ALL selected robots and create stock for each
                 for (const robotId of newEvent.robot_ids) {
@@ -249,7 +249,7 @@ const EventsPage: React.FC = () => {
                     if (stockError) {
                         console.error(`Error creating robot stock for ${robotId}:`, stockError);
                     } else {
-                        console.log(`✅ Auto-populated ${drinksInList.length} drinks to robot ${robotId} stock`);
+                        console.log(`Auto-populated ${drinksInList.length} drinks to robot ${robotId} stock`);
 
                         // Log the initial creation of stock entries
                         if (createdStock && createdStock.length > 0) {
@@ -265,9 +265,9 @@ const EventsPage: React.FC = () => {
                             const { error: logError } = await supabase.from('activity_log').insert(activityLogs);
 
                             if (logError) {
-                                console.error('❌ Failed to log robot stock creation:', logError);
+                                console.error('Failed to log robot stock creation:', logError);
                             } else {
-                                console.log(`✅ Logged ${activityLogs.length} stock creation activities for robot ${robotId}`);
+                                console.log(`Logged ${activityLogs.length} stock creation activities for robot ${robotId}`);
                             }
                         }
                     }
@@ -282,11 +282,14 @@ const EventsPage: React.FC = () => {
                     if (linkError) {
                         console.error(`Error linking robot ${robotId} to event:`, linkError);
                     } else {
-                        console.log(`✅ Linked robot ${robotId} to event`);
+                        console.log(`Linked robot ${robotId} to event`);
                     }
                 }
             }
         }
+
+        // Show success message and reset form
+        alert('Event created successfully! You can now manage drinks for this event.');
 
         fetchEvents();
         setIsCreating(false);
@@ -305,9 +308,6 @@ const EventsPage: React.FC = () => {
             min_age: '',
             max_age: ''
         });
-
-        // Navigate to drinks page for this event
-        navigate(`/drinks?eventId=${eventData.id}&eventName=${encodeURIComponent(eventData.name)}`);
     };
 
     const handleDelete = async (id: string) => {
@@ -356,7 +356,7 @@ const EventsPage: React.FC = () => {
             if (eventError) {
                 alert('Error deleting event: ' + eventError.message);
             } else {
-                console.log('✅ Event and all related data deleted successfully');
+                console.log('Event and all related data deleted successfully');
                 fetchEvents();
             }
         } catch (error: any) {
@@ -480,7 +480,7 @@ const EventsPage: React.FC = () => {
                     }));
 
                     await supabase.from('robot_drink_stock').insert(stockEntries);
-                    console.log(`✅ Created stock entries for robot ${robotId}`);
+                    console.log(`Created stock entries for robot ${robotId}`);
                 }
             }
 
@@ -502,7 +502,7 @@ const EventsPage: React.FC = () => {
                 min_age: '',
                 max_age: ''
             });
-            console.log('✅ Event updated successfully');
+            console.log('Event updated successfully');
         } catch (error: any) {
             console.error('Update operation failed:', error);
             alert('Failed to update event: ' + error.message);
@@ -578,14 +578,17 @@ const EventsPage: React.FC = () => {
                                             />
                                             <span className="text-sm">
                                                 {robot.robot_name}
-                                                {isConflicted && <span className="text-red-400 text-xs ml-2">⚠️ Conflict</span>}
+                                                {isConflicted && <span className="text-red-400 text-xs ml-2">Conflict</span>}
                                             </span>
                                         </label>
                                     );
                                 })}
                             </div>
                             {robots.length === 0 && (
-                                <p className="text-xs text-yellow-500 mt-2">⚠️ No robots found. Please add a robot to the database first.</p>
+                                <div className="col-span-full p-4 bg-red-900/30 border border-red-500/50 rounded-lg">
+                                    <p className="text-red-400 font-semibold">No robots found in database</p>
+                                    <p className="text-red-300 text-sm mt-1">Please add a robot to the database before creating an event.</p>
+                                </div>
                             )}
                         </div>
 
@@ -813,7 +816,7 @@ const EventsPage: React.FC = () => {
                                 <p className="text-gray-500 text-sm line-clamp-2 mb-6">{event.description || 'No description'}</p>
 
                                 <button
-                                    onClick={() => navigate(`/drinks?eventId=${event.id}&eventName=${encodeURIComponent(event.name)}`)}
+                                    onClick={() => navigate(`/admin/drinks?eventId=${event.id}&eventName=${encodeURIComponent(event.name)}`)}
                                     className="w-full py-2 bg-gray-700 hover:bg-gray-600 rounded flex items-center justify-center space-x-2 text-sm font-medium transition"
                                 >
                                     <span>Manage Drinks</span>
