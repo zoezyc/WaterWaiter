@@ -14,9 +14,12 @@ export function startCameraServer(): void {
     logger.info('Starting Python camera server...');
 
     // Use the venv Python to ensure dependencies like aiohttp are found
-    const pythonCmd = process.platform === 'win32'
+    // Check if venv python exists, otherwise use system python
+    const venvPython = process.platform === 'win32'
         ? path.resolve(__dirname, '../../../.venv/Scripts/python.exe')
         : path.resolve(__dirname, '../../../.venv/bin/python3');
+
+    const pythonCmd = require('fs').existsSync(venvPython) ? venvPython : (process.platform === 'win32' ? 'python' : 'python3');
 
     logger.info(`[Camera] Using Python interpreter: ${pythonCmd}`);
 

@@ -43,9 +43,12 @@ export const startRobot = async (req: Request, res: Response): Promise<void> => 
         logger.info(`Robot working directory: ${robotDir}`);
 
         // Use the venv Python to ensure dependencies like aiohttp/viam are found
-        const pythonPath = process.platform === 'win32'
+        // Check if venv python exists, otherwise use system python
+        const venvPython = process.platform === 'win32'
             ? path.resolve(__dirname, '../../../.venv/Scripts/python.exe')
             : path.resolve(__dirname, '../../../.venv/bin/python3');
+
+        const pythonPath = require('fs').existsSync(venvPython) ? venvPython : (process.platform === 'win32' ? 'python' : 'python3');
         logger.info(`Using Python: ${pythonPath}`);
 
         robotProcess = spawn(pythonPath, [robotScriptPath], {
@@ -250,9 +253,12 @@ export const manualControl = async (req: Request, res: Response): Promise<void> 
         if (!manualProcess || manualProcess.killed) {
             const manualScriptPath = path.join(process.cwd(), '..', 'robot', 'manual_drive.py');
             const robotDir = path.join(process.cwd(), '..', 'robot');
-            const pythonPath = process.platform === 'win32'
+            // Check if venv python exists, otherwise use system python
+            const venvPython = process.platform === 'win32'
                 ? path.resolve(__dirname, '../../../.venv/Scripts/python.exe')
                 : path.resolve(__dirname, '../../../.venv/bin/python3');
+
+            const pythonPath = require('fs').existsSync(venvPython) ? venvPython : (process.platform === 'win32' ? 'python' : 'python3');
 
             logger.info(`Spawning manual drive: ${manualScriptPath}`);
             manualProcess = spawn(pythonPath, [manualScriptPath], {
