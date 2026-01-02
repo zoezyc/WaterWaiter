@@ -28,6 +28,9 @@ const DrinksPage: React.FC = () => {
     const [mode, setMode] = useState<'EXISTING' | 'NEW'>('EXISTING');
     const [selectedDrinkId, setSelectedDrinkId] = useState('');
     const [newDrinkName, setNewDrinkName] = useState('');
+    const [newDrinkType, setNewDrinkType] = useState('');
+    const [newDrinkUnit, setNewDrinkUnit] = useState('');
+    const [newDrinkDescription, setNewDrinkDescription] = useState('');
     const [quantity, setQuantity] = useState(50);
 
     useEffect(() => {
@@ -94,7 +97,11 @@ const DrinksPage: React.FC = () => {
 
             if (mode === 'NEW') {
                 if (!newDrinkName.trim()) {
-                    alert("Please enter a drink name.");
+                    alert('Drink name is required');
+                    return;
+                }
+                if (quantity < 1) {
+                    alert('Quantity must be at least 1');
                     return;
                 }
                 // Check dupes locally first
@@ -109,7 +116,10 @@ const DrinksPage: React.FC = () => {
                         .insert([{
                             name: newDrinkName,
                             drink_list_id: drinkListId,
-                            type: 'general' // valid default
+                            type: newDrinkType || 'general',
+                            default_quantity: quantity,
+                            unit: newDrinkUnit,
+                            description: newDrinkDescription
                         }])
                         .select()
                         .single();
@@ -119,7 +129,11 @@ const DrinksPage: React.FC = () => {
                 }
             } else {
                 if (!drinkIdToLink) {
-                    alert("Please select a drink.");
+                    alert('Please select a drink');
+                    return;
+                }
+                if (quantity < 1) {
+                    alert('Quantity must be at least 1');
                     return;
                 }
             }
@@ -146,6 +160,9 @@ const DrinksPage: React.FC = () => {
             // Reset and Refresh
             setIsModalOpen(false);
             setNewDrinkName('');
+            setNewDrinkType('');
+            setNewDrinkUnit('');
+            setNewDrinkDescription('');
             setQuantity(50);
             fetchEventDrinks();
             fetchAvailableDrinks(drinkListId); // Refresh list if we added one
@@ -187,7 +204,7 @@ const DrinksPage: React.FC = () => {
         } else {
             setEditingDrinkId(null);
             fetchEventDrinks();
-            console.log('✅ Drink quantities updated');
+            console.log('Drink quantities updated');
         }
     };
 
@@ -200,14 +217,18 @@ const DrinksPage: React.FC = () => {
     const [drinkLists, setDrinkLists] = useState<any[]>([]);
     const [selectedListId, setSelectedListId] = useState<string | null>(null);
     const [listDrinks, setListDrinks] = useState<Drink[]>([]);
+    const [allDrinks, setAllDrinks] = useState<Drink[]>([]); // All drinks from all lists
     const [isListModalOpen, setIsListModalOpen] = useState(false);
     const [isDrinkModalOpen, setIsDrinkModalOpen] = useState(false);
+    const [drinkAddMode, setDrinkAddMode] = useState<'EXISTING' | 'NEW'>('EXISTING');
+    const [selectedExistingDrinkId, setSelectedExistingDrinkId] = useState<string>('');
     const [newListName, setNewListName] = useState('');
-    const [newDrinkForList, setNewDrinkForList] = useState({ name: '', type: '', volume: '', description: '' });
+    const [newDrinkForList, setNewDrinkForList] = useState({ name: '', type: '', volume: '', description: '', default_quantity: 50, unit: '' });
 
     useEffect(() => {
         if (!eventId) {
             fetchDrinkLists();
+            fetchAllDrinks();
         }
     }, [eventId]);
 
@@ -221,6 +242,16 @@ const DrinksPage: React.FC = () => {
         if (!error && data) {
             setDrinkLists(data);
         }
+    };
+
+    // Fetch all drinks from all lists for "use existing" feature
+    const fetchAllDrinks = async () => {
+        if (!supabase) return;
+        const { data } = await supabase
+            .from('drinks')
+            .select('*, drink_list:drink_list_id(name)')
+            .order('name');
+        if (data) setAllDrinks(data);
     };
 
     const fetchListDrinks = async (listId: string) => {
@@ -268,28 +299,80 @@ const DrinksPage: React.FC = () => {
     };
 
     const handleAddDrinkToList = async () => {
-        if (!supabase || !selectedListId || !newDrinkForList.name.trim()) {
-            alert('Please enter a drink name');
+        if (!supabase || !selectedListId) {
+            alert('Please select a drink list first');
             return;
         }
 
-        const { error } = await supabase
-            .from('drinks')
-            .insert([{
-                name: newDrinkForList.name,
-                type: newDrinkForList.type || 'general',
-                volume: newDrinkForList.volume,
-                description: newDrinkForList.description,
-                drink_list_id: selectedListId
-            }]);
+        if (drinkAddMode === 'EXISTING') {
+            // Copy existing drink to this list
+            if (!selectedExistingDrinkId) {
+                alert('Please select a drink');
+                return;
+            }
+            const sourceDrink = allDrinks.find(d => d.id === selectedExistingDrinkId);
+            if (!sourceDrink) return;
 
-        if (!error) {
-            setNewDrinkForList({ name: '', type: '', volume: '', description: '' });
-            setIsDrinkModalOpen(false);
-            fetchListDrinks(selectedListId);
-            fetchDrinkLists(); // Refresh count
+            // Check if drink already exists in this list
+            const existingInList = listDrinks.find(d => d.name.toLowerCase() === sourceDrink.name.toLowerCase());
+            if (existingInList) {
+                alert(`"${sourceDrink.name}" already exists in this list`);
+                return;
+            }
+
+            const { error } = await supabase
+                .from('drinks')
+                .insert([{
+                    name: sourceDrink.name,
+                    type: sourceDrink.type || 'general',
+                    volume: sourceDrink.volume,
+                    description: sourceDrink.description,
+                    default_quantity: sourceDrink.default_quantity || 50,
+                    unit: sourceDrink.unit || '',
+                    drink_list_id: selectedListId
+                }]);
+
+            if (!error) {
+                setSelectedExistingDrinkId('');
+                setIsDrinkModalOpen(false);
+                fetchListDrinks(selectedListId);
+                fetchDrinkLists();
+                fetchAllDrinks();
+            } else {
+                alert('Error adding drink: ' + error.message);
+            }
         } else {
-            alert('Error adding drink: ' + error.message);
+            // Create new drink
+            if (!newDrinkForList.name.trim()) {
+                alert('Drink name is required');
+                return;
+            }
+            if (newDrinkForList.default_quantity < 1) {
+                alert('Default quantity must be at least 1');
+                return;
+            }
+
+            const { error } = await supabase
+                .from('drinks')
+                .insert([{
+                    name: newDrinkForList.name,
+                    type: newDrinkForList.type || 'general',
+                    volume: newDrinkForList.volume,
+                    description: newDrinkForList.description,
+                    default_quantity: newDrinkForList.default_quantity || 50,
+                    unit: newDrinkForList.unit || '',
+                    drink_list_id: selectedListId
+                }]);
+
+            if (!error) {
+                setNewDrinkForList({ name: '', type: '', volume: '', description: '', default_quantity: 50, unit: '' });
+                setIsDrinkModalOpen(false);
+                fetchListDrinks(selectedListId);
+                fetchDrinkLists();
+                fetchAllDrinks();
+            } else {
+                alert('Error adding drink: ' + error.message);
+            }
         }
     };
 
@@ -340,8 +423,8 @@ const DrinksPage: React.FC = () => {
                                                 fetchListDrinks(list.id);
                                             }}
                                             className={`p-3 rounded-lg cursor-pointer transition ${selectedListId === list.id
-                                                    ? 'bg-purple-600'
-                                                    : 'bg-gray-700 hover:bg-gray-600'
+                                                ? 'bg-purple-600'
+                                                : 'bg-gray-700 hover:bg-gray-600'
                                                 }`}
                                         >
                                             <div className="flex justify-between items-center">
@@ -458,43 +541,130 @@ const DrinksPage: React.FC = () => {
                 {/* Add Drink Modal */}
                 {isDrinkModalOpen && (
                     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                        <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 w-96">
+                        <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 w-[450px]">
                             <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-xl font-bold">Add Drink</h3>
+                                <h3 className="text-xl font-bold">Add Drink to List</h3>
                                 <button onClick={() => setIsDrinkModalOpen(false)}>
                                     <X size={20} />
                                 </button>
                             </div>
-                            <div className="space-y-3">
-                                <input
-                                    type="text"
-                                    placeholder="Drink Name *"
-                                    value={newDrinkForList.name}
-                                    onChange={e => setNewDrinkForList({ ...newDrinkForList, name: e.target.value })}
-                                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg"
-                                />
-                                <input
-                                    type="text"
-                                    placeholder="Type (e.g., Soft Drink)"
-                                    value={newDrinkForList.type}
-                                    onChange={e => setNewDrinkForList({ ...newDrinkForList, type: e.target.value })}
-                                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg"
-                                />
-                                <input
-                                    type="text"
-                                    placeholder="Volume (e.g., 330ml)"
-                                    value={newDrinkForList.volume}
-                                    onChange={e => setNewDrinkForList({ ...newDrinkForList, volume: e.target.value })}
-                                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg"
-                                />
-                                <textarea
-                                    placeholder="Description (optional)"
-                                    value={newDrinkForList.description}
-                                    onChange={e => setNewDrinkForList({ ...newDrinkForList, description: e.target.value })}
-                                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg"
-                                    rows={2}
-                                />
+
+                            {/* Mode Toggle */}
+                            <div className="flex bg-gray-900 p-1 rounded-lg mb-4">
+                                <button
+                                    onClick={() => setDrinkAddMode('EXISTING')}
+                                    className={`flex-1 py-2 rounded-md font-medium text-sm transition ${drinkAddMode === 'EXISTING' ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-white'}`}
+                                >
+                                    Use Existing
+                                </button>
+                                <button
+                                    onClick={() => setDrinkAddMode('NEW')}
+                                    className={`flex-1 py-2 rounded-md font-medium text-sm transition ${drinkAddMode === 'NEW' ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-white'}`}
+                                >
+                                    Create New
+                                </button>
                             </div>
+
+                            {drinkAddMode === 'EXISTING' ? (
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-400 mb-2">Select from Existing Drinks</label>
+                                        <select
+                                            value={selectedExistingDrinkId}
+                                            onChange={e => setSelectedExistingDrinkId(e.target.value)}
+                                            className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg"
+                                        >
+                                            <option value="">-- Choose a Drink --</option>
+                                            {allDrinks.map(d => (
+                                                <option key={d.id} value={d.id}>
+                                                    {d.name} {(d as any).drink_list?.name ? `(from: ${(d as any).drink_list.name})` : ''}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    {selectedExistingDrinkId && (
+                                        <div className="p-3 bg-gray-700/50 rounded-lg text-sm">
+                                            {(() => {
+                                                const drink = allDrinks.find(d => d.id === selectedExistingDrinkId);
+                                                if (!drink) return null;
+                                                return (
+                                                    <div className="space-y-1">
+                                                        <p className="font-medium">{drink.name}</p>
+                                                        {drink.type && <p className="text-gray-400">Type: {drink.type}</p>}
+                                                        {drink.volume && <p className="text-gray-400">Volume: {drink.volume}</p>}
+                                                        {drink.default_quantity && <p className="text-gray-400">Default Qty: {drink.default_quantity} {drink.unit || ''}</p>}
+                                                        {drink.description && <p className="text-gray-400 italic">{drink.description}</p>}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    )}
+                                    <p className="text-xs text-gray-500">This will copy the drink to the selected list.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    <input
+                                        type="text"
+                                        placeholder="Drink Name *"
+                                        value={newDrinkForList.name}
+                                        onChange={e => setNewDrinkForList({ ...newDrinkForList, name: e.target.value })}
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg"
+                                    />
+                                    <input
+                                        type="text"
+                                        placeholder="Type (e.g., Soft Drink)"
+                                        value={newDrinkForList.type}
+                                        onChange={e => setNewDrinkForList({ ...newDrinkForList, type: e.target.value })}
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg"
+                                    />
+                                    <input
+                                        type="text"
+                                        placeholder="Volume (e.g., 330ml)"
+                                        value={newDrinkForList.volume}
+                                        onChange={e => setNewDrinkForList({ ...newDrinkForList, volume: e.target.value })}
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg"
+                                    />
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">Default Quantity</label>
+                                            <input
+                                                type="number"
+                                                placeholder="50"
+                                                value={newDrinkForList.default_quantity}
+                                                onChange={e => {
+                                                    const val = parseInt(e.target.value);
+                                                    setNewDrinkForList({ ...newDrinkForList, default_quantity: isNaN(val) ? 0 : Math.max(0, val) });
+                                                }}
+                                                onKeyDown={e => {
+                                                    if (e.key === '-' || e.key === 'e' || e.key === '+' || e.key === '.') {
+                                                        e.preventDefault();
+                                                    }
+                                                }}
+                                                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg"
+                                                min="1"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">Unit</label>
+                                            <input
+                                                type="text"
+                                                placeholder="e.g., ml, oz, cups"
+                                                value={newDrinkForList.unit}
+                                                onChange={e => setNewDrinkForList({ ...newDrinkForList, unit: e.target.value })}
+                                                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg"
+                                            />
+                                        </div>
+                                    </div>
+                                    <textarea
+                                        placeholder="Description (optional)"
+                                        value={newDrinkForList.description}
+                                        onChange={e => setNewDrinkForList({ ...newDrinkForList, description: e.target.value })}
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg"
+                                        rows={2}
+                                    />
+                                </div>
+                            )}
+
                             <div className="flex gap-2 mt-4">
                                 <button
                                     onClick={() => setIsDrinkModalOpen(false)}
@@ -685,16 +855,48 @@ const DrinksPage: React.FC = () => {
                                     )}
                                 </div>
                             ) : (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-400 mb-2">New Drink Name</label>
-                                    <input
-                                        type="text"
-                                        value={newDrinkName}
-                                        onChange={(e) => setNewDrinkName(e.target.value)}
-                                        placeholder="e.g. Orange Juice"
-                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500"
-                                    />
-                                    <p className="text-xs text-gray-500 mt-1">Will be added to the current Drink List.</p>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-400 mb-2">Drink Name *</label>
+                                        <input
+                                            type="text"
+                                            value={newDrinkName}
+                                            onChange={(e) => setNewDrinkName(e.target.value)}
+                                            placeholder="e.g. Orange Juice"
+                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-400 mb-2">Type</label>
+                                        <input
+                                            type="text"
+                                            value={newDrinkType}
+                                            onChange={(e) => setNewDrinkType(e.target.value)}
+                                            placeholder="e.g. Soft Drink, Juice, Cocktail"
+                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-400 mb-2">Unit</label>
+                                        <input
+                                            type="text"
+                                            value={newDrinkUnit}
+                                            onChange={(e) => setNewDrinkUnit(e.target.value)}
+                                            placeholder="e.g. ml, oz, cups"
+                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-400 mb-2">Description</label>
+                                        <textarea
+                                            value={newDrinkDescription}
+                                            onChange={(e) => setNewDrinkDescription(e.target.value)}
+                                            placeholder="Optional description..."
+                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500"
+                                            rows={2}
+                                        />
+                                    </div>
+                                    <p className="text-xs text-gray-500">Will be added to the current Drink List.</p>
                                 </div>
                             )}
 
@@ -703,8 +905,17 @@ const DrinksPage: React.FC = () => {
                                 <input
                                     type="number"
                                     value={quantity}
-                                    onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
+                                    onChange={(e) => {
+                                        const val = parseInt(e.target.value);
+                                        setQuantity(isNaN(val) ? 0 : Math.max(0, val));
+                                    }}
+                                    onKeyDown={e => {
+                                        if (e.key === '-' || e.key === 'e' || e.key === '+' || e.key === '.') {
+                                            e.preventDefault();
+                                        }
+                                    }}
                                     className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500"
+                                    min="1"
                                 />
                             </div>
                         </div>

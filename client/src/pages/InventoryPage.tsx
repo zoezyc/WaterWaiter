@@ -17,7 +17,9 @@ interface RobotStock {
 
 const InventoryPage: React.FC = () => {
     const [robots, setRobots] = useState<any[]>([]);
+    const [events, setEvents] = useState<{ id: string, name: string }[]>([]);
     const [selectedRobotId, setSelectedRobotId] = useState<string>(''); // Local state, empty = show all
+    const [selectedEventId, setSelectedEventId] = useState<string>(''); // Event filter
     const [inventory, setInventory] = useState<RobotStock[]>([]);
     const [loading, setLoading] = useState(true);
     const [editingStockId, setEditingStockId] = useState<string | null>(null);
@@ -58,17 +60,33 @@ const InventoryPage: React.FC = () => {
                     [key]: { ...eventRobotData[key], capacity: newCapacity }
                 });
             }
-            console.log(`✅ Capacity updated to ${newCapacity}`);
+            console.log(`Capacity updated to ${newCapacity}`);
+        }
+    };
+
+    // Fetch all events for the dropdown
+    const fetchEvents = async () => {
+        if (!supabase) return;
+        const { data, error } = await supabase
+            .from('events')
+            .select('id, name')
+            .in('status', ['scheduled', 'active'])
+            .order('created_at', { ascending: false });
+        if (error) {
+            console.error('Error fetching events:', error);
+        } else if (data) {
+            setEvents(data);
         }
     };
 
     useEffect(() => {
         fetchRobots();
+        fetchEvents();
     }, []);
 
     useEffect(() => {
         fetchInventory();
-    }, [selectedRobotId]);
+    }, [selectedRobotId, selectedEventId]);
 
     const fetchInventory = async () => {
         if (!supabase) return;
@@ -94,9 +112,14 @@ const InventoryPage: React.FC = () => {
             }
 
             // Filter by selected robot if specified
-            const filteredEventRobots = selectedRobotId
+            let filteredEventRobots = selectedRobotId
                 ? eventRobots.filter((er: any) => er.robot_id === selectedRobotId)
                 : eventRobots;
+
+            // Filter by selected event if specified
+            if (selectedEventId) {
+                filteredEventRobots = filteredEventRobots.filter((er: any) => er.event_id === selectedEventId);
+            }
 
             const allInventory: RobotStock[] = [];
             const capacityData: Record<string, { id: string, capacity: number }> = {};
@@ -153,9 +176,9 @@ const InventoryPage: React.FC = () => {
                             });
 
                             if (logError) {
-                                console.error('❌ Failed to log stock creation:', logError);
+                                console.error('Failed to log stock creation:', logError);
                             } else {
-                                console.log('✅ Logged stock creation');
+                                console.log('Logged stock creation');
                             }
                         }
                     }
@@ -266,7 +289,7 @@ const InventoryPage: React.FC = () => {
                 }
             }
 
-            alert('✅ Robot inventory synced with event drinks!');
+            alert('Robot inventory synced with event drinks!');
             fetchInventory();
         } catch (error: any) {
             alert('Sync failed: ' + error.message);
@@ -331,10 +354,10 @@ const InventoryPage: React.FC = () => {
                 });
 
                 if (logError) {
-                    console.error('❌ Failed to log activity:', logError);
+                    console.error('Failed to log activity:', logError);
                     alert('Warning: Activity log failed: ' + logError.message);
                 } else {
-                    console.log('✅ Activity logged successfully');
+                    console.log('Activity logged successfully');
                 }
             }
 
@@ -371,22 +394,6 @@ const InventoryPage: React.FC = () => {
                     <p className="text-gray-400 mt-1">Manage physical stock levels for each robot</p>
                 </div>
                 <div className="flex items-center space-x-3">
-                    {/* Robot Selector */}
-                    <div className="flex items-center space-x-2">
-                        <label className="text-sm text-gray-400">Filter by Robot:</label>
-                        <select
-                            className="px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:border-purple-500 outline-none"
-                            value={selectedRobotId}
-                            onChange={(e) => setSelectedRobotId(e.target.value)}
-                        >
-                            <option value="">All Robots</option>
-                            {robots.map(robot => (
-                                <option key={robot.id} value={robot.id}>
-                                    {robot.robot_name}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
                     <button onClick={syncWithEventDrinks} className="flex items-center space-x-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition">
                         <RefreshCw size={18} />
                         <span>Sync with Events</span>
@@ -395,6 +402,38 @@ const InventoryPage: React.FC = () => {
                         <RefreshCw size={18} />
                         <span>Refresh</span>
                     </button>
+                </div>
+            </div>
+
+            {/* Robot & Event Selectors - Matching StaffTabletDashboard Style */}
+            <div className="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="text-gray-400 text-sm mb-2 block">Robot:</label>
+                        <select
+                            value={selectedRobotId}
+                            onChange={(e) => setSelectedRobotId(e.target.value)}
+                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 outline-none focus:border-purple-500 transition"
+                        >
+                            <option value="">All Robots</option>
+                            {robots.map(robot => (
+                                <option key={robot.id} value={robot.id}>{robot.robot_name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-gray-400 text-sm mb-2 block">Event:</label>
+                        <select
+                            value={selectedEventId}
+                            onChange={(e) => setSelectedEventId(e.target.value)}
+                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 outline-none focus:border-purple-500 transition"
+                        >
+                            <option value="">All Events</option>
+                            {events.map(event => (
+                                <option key={event.id} value={event.id}>{event.name}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -409,13 +448,21 @@ const InventoryPage: React.FC = () => {
             ) : (
                 <>
                     {/* Total Capacity Configuration */}
-                    <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 mb-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <h3 className="font-semibold text-lg">Robot Capacity Settings</h3>
-                                <p className="text-sm text-gray-400">Configure total drink capacity per robot per event</p>
-                            </div>
-                            <div className="flex items-center space-x-3">
+                    <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden mb-4">
+                        <div className="p-4 border-b border-gray-700">
+                            <h3 className="font-semibold text-lg">Robot Capacity Settings</h3>
+                            <p className="text-sm text-gray-400">Configure total drink capacity per robot per event</p>
+                        </div>
+                        <table className="w-full">
+                            <thead className="bg-gray-700/50 border-b border-gray-700">
+                                <tr>
+                                    <th className="p-3 text-left font-medium text-sm">Robot</th>
+                                    <th className="p-3 text-left font-medium text-sm">Event</th>
+                                    <th className="p-3 text-center font-medium text-sm">Max Capacity</th>
+                                    <th className="p-3 text-center font-medium text-sm">Allocated</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
                                 {Object.entries(
                                     inventory.reduce((acc, stock) => {
                                         const key = `${stock.robot_id}_${stock.event_id}`;
@@ -430,52 +477,78 @@ const InventoryPage: React.FC = () => {
                                         acc[key].total_allocated += stock.max_quantity;
                                         return acc;
                                     }, {} as Record<string, any>)
-                                ).map(([key, data]) => (
-                                    <div key={key} className="flex items-center space-x-2 bg-gray-900 px-4 py-2 rounded-lg border border-gray-700">
-                                        <div className="text-sm">
-                                            <span className="font-medium">{data.robot_name}</span>
-                                            <span className="text-gray-500 mx-2">@</span>
-                                            <span className="text-gray-400">{data.event_name}</span>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <span className="text-gray-500 text-sm">Max:</span>
-                                            <input
-                                                type="number"
-                                                value={eventRobotData[key]?.capacity ?? 50}
-                                                onChange={(e) => {
-                                                    const val = e.target.value;
-                                                    const numVal = val === '' ? 0 : parseInt(val);
-                                                    const eventRobotId = eventRobotData[key]?.id;
-                                                    if (eventRobotId) {
-                                                        // Update local state immediately for UX
-                                                        setEventRobotData({
-                                                            ...eventRobotData,
-                                                            [key]: { ...eventRobotData[key], capacity: numVal }
-                                                        });
-                                                    }
-                                                }}
-                                                onBlur={(e) => {
-                                                    const val = parseInt(e.target.value);
-                                                    const eventRobotId = eventRobotData[key]?.id;
-                                                    if (eventRobotId) {
-                                                        if (isNaN(val) || val < 1) {
-                                                            updateCapacity(eventRobotId, 50);
-                                                        } else {
-                                                            updateCapacity(eventRobotId, val);
+                                ).map(([key, data]) => {
+                                    const capacity = eventRobotData[key]?.capacity || 50;
+                                    const isOverAllocated = data.total_allocated > capacity;
+
+                                    return (
+                                        <tr key={key} className="hover:bg-gray-700/30 transition">
+                                            <td className="p-3 font-medium">{data.robot_name}</td>
+                                            <td className="p-3 text-gray-400">{data.event_name}</td>
+                                            <td className="p-3 text-center">
+                                                <input
+                                                    type="number"
+                                                    value={eventRobotData[key]?.capacity ?? 50}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        // Allow empty for typing, validate on blur
+                                                        const numVal = val === '' ? 0 : parseInt(val);
+                                                        const eventRobotId = eventRobotData[key]?.id;
+                                                        if (eventRobotId) {
+                                                            setEventRobotData({
+                                                                ...eventRobotData,
+                                                                [key]: { ...eventRobotData[key], capacity: numVal }
+                                                            });
                                                         }
-                                                    }
-                                                }}
-                                                className="w-16 px-2 py-1 bg-gray-950 border border-purple-500 rounded text-center text-sm"
-                                                min="1"
-                                            />
-                                            <span className={`text-sm ${data.total_allocated > (eventRobotData[key]?.capacity || 50) ? 'text-red-400' : 'text-gray-500'}`}>
-                                                / {data.total_allocated} allocated
-                                            </span>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
+                                                    }}
+                                                    onBlur={(e) => {
+                                                        const val = parseInt(e.target.value);
+                                                        const eventRobotId = eventRobotData[key]?.id;
+                                                        if (eventRobotId) {
+                                                            // Validation: must be >= 1 and <= 1000
+                                                            if (isNaN(val) || val < 1) {
+                                                                alert('Capacity must be at least 1');
+                                                                setEventRobotData({
+                                                                    ...eventRobotData,
+                                                                    [key]: { ...eventRobotData[key], capacity: 50 }
+                                                                });
+                                                                updateCapacity(eventRobotId, 50);
+                                                            } else if (val > 1000) {
+                                                                alert('Capacity cannot exceed 1000');
+                                                                setEventRobotData({
+                                                                    ...eventRobotData,
+                                                                    [key]: { ...eventRobotData[key], capacity: 1000 }
+                                                                });
+                                                                updateCapacity(eventRobotId, 1000);
+                                                            } else {
+                                                                updateCapacity(eventRobotId, val);
+                                                            }
+                                                        }
+                                                    }}
+                                                    onKeyDown={(e) => {
+                                                        // Prevent non-numeric input
+                                                        if (e.key === '-' || e.key === 'e' || e.key === '+' || e.key === '.') {
+                                                            e.preventDefault();
+                                                        }
+                                                    }}
+                                                    className="w-20 px-3 py-1 bg-gray-900 border border-gray-600 rounded text-center focus:border-purple-500 outline-none"
+                                                    min="1"
+                                                    max="1000"
+                                                />
+                                            </td>
+                                            <td className="p-3 text-center">
+                                                <span className={isOverAllocated ? 'text-red-400 font-bold' : 'text-gray-300'}>
+                                                    {data.total_allocated}
+                                                </span>
+                                                {isOverAllocated && (
+                                                    <span className="text-red-400 text-xs ml-2">(exceeds capacity)</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
                     </div>
 
                     <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
