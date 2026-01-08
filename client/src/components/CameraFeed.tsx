@@ -16,10 +16,22 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
     const [isConnected, setIsConnected] = useState(false);
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+    // Get camera server URL - use same host as the page, but on port 3001
+    const getCameraUrl = () => {
+        // If there's an environment variable, use it
+        const envUrl = import.meta.env.VITE_CAMERA_URL;
+        if (envUrl) return envUrl;
+        
+        // Otherwise, use the same hostname as the current page with port 3001
+        const hostname = window.location.hostname || 'localhost';
+        return `http://${hostname}:3001`;
+    };
+
     const fetchFrame = async () => {
         try {
-            // Use Python camera server on port 3001
-            const response = await fetch('http://127.0.0.1:3001/frame');
+            // Use Python camera server - dynamically resolved
+            const cameraUrl = getCameraUrl();
+            const response = await fetch(`${cameraUrl}/frame`);
 
             if (!response.ok) {
                 throw new Error('Camera not available');
